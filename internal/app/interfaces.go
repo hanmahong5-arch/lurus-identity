@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
@@ -49,6 +50,10 @@ type subscriptionStore interface {
 	ListByAccount(ctx context.Context, accountID int64) ([]entity.Subscription, error)
 	ListActiveExpired(ctx context.Context) ([]entity.Subscription, error)
 	ListGraceExpired(ctx context.Context) ([]entity.Subscription, error)
+	// ListDueForRenewal returns active subscriptions that are due for auto-renewal.
+	ListDueForRenewal(ctx context.Context) ([]entity.Subscription, error)
+	// UpdateRenewalState persists renewal attempt counter and next retry time.
+	UpdateRenewalState(ctx context.Context, subID int64, attempts int, nextAt *time.Time) error
 	UpsertEntitlement(ctx context.Context, e *entity.AccountEntitlement) error
 	GetEntitlements(ctx context.Context, accountID int64, productID string) ([]entity.AccountEntitlement, error)
 	DeleteEntitlements(ctx context.Context, accountID int64, productID string) error
@@ -72,4 +77,28 @@ type entitlementCache interface {
 	Get(ctx context.Context, accountID int64, productID string) (map[string]string, error)
 	Set(ctx context.Context, accountID int64, productID string, em map[string]string) error
 	Invalidate(ctx context.Context, accountID int64, productID string) error
+}
+
+// invoiceStore defines persistence operations for invoices.
+type invoiceStore interface {
+	Create(ctx context.Context, inv *entity.Invoice) error
+	GetByOrderNo(ctx context.Context, orderNo string) (*entity.Invoice, error)
+	GetByInvoiceNo(ctx context.Context, invoiceNo string) (*entity.Invoice, error)
+	ListByAccount(ctx context.Context, accountID int64, page, pageSize int) ([]entity.Invoice, int64, error)
+	AdminList(ctx context.Context, filterAccountID int64, page, pageSize int) ([]entity.Invoice, int64, error)
+}
+
+// redemptionCodeStore defines persistence operations for bulk redemption code creation.
+type redemptionCodeStore interface {
+	BulkCreate(ctx context.Context, codes []entity.RedemptionCode) error
+}
+
+// refundStore defines persistence operations for refunds.
+type refundStore interface {
+	Create(ctx context.Context, r *entity.Refund) error
+	GetByRefundNo(ctx context.Context, refundNo string) (*entity.Refund, error)
+	GetPendingByOrderNo(ctx context.Context, orderNo string) (*entity.Refund, error)
+	UpdateStatus(ctx context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error
+	MarkCompleted(ctx context.Context, refundNo string, completedAt time.Time) error
+	ListByAccount(ctx context.Context, accountID int64, page, pageSize int) ([]entity.Refund, int64, error)
 }

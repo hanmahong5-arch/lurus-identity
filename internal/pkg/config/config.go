@@ -54,9 +54,20 @@ type Config struct {
 	CreemWebhookSecret    string
 	CreemReturnURL        string
 
+	// Email (SMTP)
+	EmailSMTPHost string // EMAIL_SMTP_HOST (empty = noop sender)
+	EmailSMTPPort int    // EMAIL_SMTP_PORT (default: 587)
+	EmailSMTPUser string // EMAIL_SMTP_USER
+	EmailSMTPPass string // EMAIL_SMTP_PASS
+	EmailFrom     string // EMAIL_FROM
+
 	// Timeouts
-	ShutdownTimeout time.Duration
+	ShutdownTimeout     time.Duration
 	CacheEntitlementTTL time.Duration
+
+	// OpenTelemetry tracing
+	OtelEndpoint    string // OTEL_EXPORTER_OTLP_ENDPOINT (empty = noop)
+	OtelServiceName string // OTEL_SERVICE_NAME (default: lurus-identity)
 }
 
 // Load reads config from environment variables and validates required fields.
@@ -89,8 +100,15 @@ func Load() (*Config, error) {
 		CreemAPIKey:         getEnv("CREEM_API_KEY", ""),
 		CreemWebhookSecret:  getEnv("CREEM_WEBHOOK_SECRET", ""),
 		CreemReturnURL:      getEnv("CREEM_RETURN_URL", ""),
+		EmailSMTPHost:       getEnv("EMAIL_SMTP_HOST", ""),
+		EmailSMTPPort:       parseInt("EMAIL_SMTP_PORT", 587),
+		EmailSMTPUser:       getEnv("EMAIL_SMTP_USER", ""),
+		EmailSMTPPass:       getEnv("EMAIL_SMTP_PASS", ""),
+		EmailFrom:           getEnv("EMAIL_FROM", ""),
 		ShutdownTimeout:     parseDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
 		CacheEntitlementTTL: parseDuration("CACHE_ENTITLEMENT_TTL", 5*time.Minute),
+		OtelEndpoint:        getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		OtelServiceName:     getEnv("OTEL_SERVICE_NAME", "lurus-identity"),
 	}
 
 	return cfg, nil

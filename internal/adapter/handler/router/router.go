@@ -19,6 +19,10 @@ type Deps struct {
 	Products      *handler.ProductHandler
 	Internal      *handler.InternalHandler
 	Webhooks      *handler.WebhookHandler
+	Invoices      *handler.InvoiceHandler
+	Refunds       *handler.RefundHandler
+	AdminOps      *handler.AdminOpsHandler
+	Reports       *handler.ReportHandler
 	InternalKey   string // secret for /internal/* bearer auth
 	JWT           *auth.JWTMiddleware
 	RateLimit     *ratelimit.Limiter
@@ -67,6 +71,16 @@ func Build(deps Deps) *gin.Engine {
 		v1.POST("/wallet/topup", deps.Wallets.CreateTopup)
 		v1.GET("/wallet/orders", deps.Wallets.ListOrders)
 		v1.GET("/wallet/orders/:order_no", deps.Wallets.GetOrder)
+
+		// Invoices
+		v1.POST("/invoices", deps.Invoices.GenerateInvoice)
+		v1.GET("/invoices", deps.Invoices.ListInvoices)
+		v1.GET("/invoices/:invoice_no", deps.Invoices.GetInvoice)
+
+		// Refunds
+		v1.POST("/refunds", deps.Refunds.RequestRefund)
+		v1.GET("/refunds", deps.Refunds.ListRefunds)
+		v1.GET("/refunds/:refund_no", deps.Refunds.GetRefund)
 	}
 
 	// Internal service-to-service API — bearer token auth
@@ -93,6 +107,19 @@ func Build(deps Deps) *gin.Engine {
 		admin.PUT("/products/:id", deps.Products.AdminUpdateProduct)
 		admin.POST("/products/:id/plans", deps.Products.AdminCreatePlan)
 		admin.PUT("/plans/:id", deps.Products.AdminUpdatePlan)
+
+		// Admin Invoices
+		admin.GET("/invoices", deps.Invoices.AdminList)
+
+		// Admin Refunds
+		admin.POST("/refunds/:refund_no/approve", deps.Refunds.AdminApprove)
+		admin.POST("/refunds/:refund_no/reject", deps.Refunds.AdminReject)
+
+		// Admin Ops: batch redemption code generation
+		admin.POST("/redemption-codes/batch", deps.AdminOps.BatchGenerateCodes)
+
+		// Admin Reports: financial reconciliation
+		admin.GET("/reports/financial", deps.Reports.FinancialReport)
 	}
 
 	// Payment provider webhooks — signature-verified per-provider

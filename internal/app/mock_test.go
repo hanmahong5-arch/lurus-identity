@@ -419,6 +419,42 @@ func (m *mockSubStore) GetEntitlements(_ context.Context, accountID int64, produ
 	return out, nil
 }
 
+func (m *mockSubStore) ListDueForRenewal(_ context.Context) ([]entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(24 * time.Hour)
+	var out []entity.Subscription
+	for _, s := range m.subs {
+		if !s.AutoRenew || s.Status != entity.SubStatusActive {
+			continue
+		}
+		if s.ExpiresAt == nil || s.ExpiresAt.Before(now) || s.ExpiresAt.After(cutoff) {
+			continue
+		}
+		if s.RenewalAttempts >= 3 {
+			continue
+		}
+		if s.NextRenewalAt != nil && s.NextRenewalAt.After(now) {
+			continue
+		}
+		out = append(out, *s)
+	}
+	return out, nil
+}
+
+func (m *mockSubStore) UpdateRenewalState(_ context.Context, subID int64, attempts int, nextAt *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.subs[subID]
+	if !ok {
+		return fmt.Errorf("subscription %d not found", subID)
+	}
+	s.RenewalAttempts = attempts
+	s.NextRenewalAt = nextAt
+	return nil
+}
+
 func (m *mockSubStore) ListActiveExpired(_ context.Context) ([]entity.Subscription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -454,6 +490,201 @@ func (m *mockSubStore) DeleteEntitlements(_ context.Context, accountID int64, pr
 			delete(m.entitlements, k)
 		}
 	}
+	return nil
+}
+
+// ── invoiceStore mock ─────────────────────────────────────────────────────────
+
+type mockInvoiceStore struct {
+	mu        sync.Mutex
+	byID      map[int64]*entity.Invoice
+	byOrderNo map[string]*entity.Invoice
+	byNo      map[string]*entity.Invoice
+	nextID    int64
+}
+
+func newMockInvoiceStore() *mockInvoiceStore {
+	return &mockInvoiceStore{
+		byID:      make(map[int64]*entity.Invoice),
+		byOrderNo: make(map[string]*entity.Invoice),
+		byNo:      make(map[string]*entity.Invoice),
+		nextID:    1,
+	}
+}
+
+func (m *mockInvoiceStore) Create(_ context.Context, inv *entity.Invoice) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv.ID = m.nextID
+	m.nextID++
+	inv.CreatedAt = time.Now()
+	inv.UpdatedAt = time.Now()
+	cp := *inv
+	m.byID[cp.ID] = &cp
+	m.byOrderNo[cp.OrderNo] = &cp
+	m.byNo[cp.InvoiceNo] = &cp
+	return nil
+}
+
+func (m *mockInvoiceStore) GetByOrderNo(_ context.Context, orderNo string) (*entity.Invoice, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.byOrderNo[orderNo]
+	if !ok {
+		return nil, nil
+	}
+	cp := *inv
+	return &cp, nil
+}
+
+func (m *mockInvoiceStore) GetByInvoiceNo(_ context.Context, invoiceNo string) (*entity.Invoice, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.byNo[invoiceNo]
+	if !ok {
+		return nil, nil
+	}
+	cp := *inv
+	return &cp, nil
+}
+
+func (m *mockInvoiceStore) ListByAccount(_ context.Context, accountID int64, _, _ int) ([]entity.Invoice, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Invoice
+	for _, inv := range m.byID {
+		if inv.AccountID == accountID {
+			out = append(out, *inv)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+func (m *mockInvoiceStore) AdminList(_ context.Context, filterAccountID int64, _, _ int) ([]entity.Invoice, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Invoice
+	for _, inv := range m.byID {
+		if filterAccountID == 0 || inv.AccountID == filterAccountID {
+			out = append(out, *inv)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+// ── refundStore mock ──────────────────────────────────────────────────────────
+
+type mockRefundStore struct {
+	mu     sync.Mutex
+	byID   map[int64]*entity.Refund
+	byNo   map[string]*entity.Refund
+	nextID int64
+}
+
+func newMockRefundStore() *mockRefundStore {
+	return &mockRefundStore{
+		byID:   make(map[int64]*entity.Refund),
+		byNo:   make(map[string]*entity.Refund),
+		nextID: 1,
+	}
+}
+
+func (m *mockRefundStore) Create(_ context.Context, r *entity.Refund) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r.ID = m.nextID
+	m.nextID++
+	r.CreatedAt = time.Now()
+	r.UpdatedAt = time.Now()
+	cp := *r
+	m.byID[cp.ID] = &cp
+	m.byNo[cp.RefundNo] = &cp
+	return nil
+}
+
+func (m *mockRefundStore) GetByRefundNo(_ context.Context, refundNo string) (*entity.Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.byNo[refundNo]
+	if !ok {
+		return nil, nil
+	}
+	cp := *r
+	return &cp, nil
+}
+
+func (m *mockRefundStore) GetPendingByOrderNo(_ context.Context, orderNo string) (*entity.Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.byID {
+		if r.OrderNo == orderNo &&
+			(r.Status == entity.RefundStatusPending || r.Status == entity.RefundStatusApproved) {
+			cp := *r
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockRefundStore) UpdateStatus(_ context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.byNo[refundNo]
+	if !ok {
+		return fmt.Errorf("refund %s not found", refundNo)
+	}
+	r.Status = entity.RefundStatus(status)
+	r.ReviewNote = reviewNote
+	r.ReviewedBy = reviewedBy
+	r.ReviewedAt = reviewedAt
+	r.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *mockRefundStore) MarkCompleted(_ context.Context, refundNo string, completedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.byNo[refundNo]
+	if !ok {
+		return fmt.Errorf("refund %s not found", refundNo)
+	}
+	r.Status = entity.RefundStatusCompleted
+	r.CompletedAt = &completedAt
+	r.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *mockRefundStore) ListByAccount(_ context.Context, accountID int64, _, _ int) ([]entity.Refund, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Refund
+	for _, r := range m.byID {
+		if r.AccountID == accountID {
+			out = append(out, *r)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+// ── redemptionCodeStore mock ──────────────────────────────────────────────────
+
+type mockRedemptionCodeStore struct {
+	mu    sync.Mutex
+	codes []entity.RedemptionCode
+	err   error // if non-nil, BulkCreate returns this error
+}
+
+func newMockRedemptionCodeStore() *mockRedemptionCodeStore {
+	return &mockRedemptionCodeStore{}
+}
+
+func (m *mockRedemptionCodeStore) BulkCreate(_ context.Context, codes []entity.RedemptionCode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.codes = append(m.codes, codes...)
 	return nil
 }
 

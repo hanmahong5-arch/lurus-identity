@@ -15,8 +15,10 @@ type Subscription struct {
 	AutoRenew      bool       `json:"auto_renew"   gorm:"default:false"`
 	PaymentMethod  string     `json:"payment_method"   gorm:"type:varchar(32)"`
 	ExternalSubID  string     `json:"external_sub_id"  gorm:"type:varchar(128)"`
-	CreatedAt      time.Time  `json:"created_at"       gorm:"autoCreateTime"`
-	UpdatedAt      time.Time  `json:"updated_at"       gorm:"autoUpdateTime"`
+	CreatedAt       time.Time  `json:"created_at"        gorm:"autoCreateTime"`
+	UpdatedAt       time.Time  `json:"updated_at"        gorm:"autoUpdateTime"`
+	RenewalAttempts int        `json:"renewal_attempts"  gorm:"default:0"`
+	NextRenewalAt   *time.Time `json:"next_renewal_at,omitempty"`
 }
 
 func (Subscription) TableName() string { return "identity.subscriptions" }

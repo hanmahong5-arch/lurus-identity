@@ -20,6 +20,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	otelgin "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+
 	"github.com/hanmahong5-arch/lurus-identity/internal/adapter/handler"
 	identitynats "github.com/hanmahong5-arch/lurus-identity/internal/adapter/nats"
 	"github.com/hanmahong5-arch/lurus-identity/internal/adapter/handler/router"
@@ -30,9 +32,11 @@ import (
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/auth"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/cache"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/config"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/email"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/idempotency"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/metrics"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/ratelimit"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/tracing"
 	lurusweb "github.com/hanmahong5-arch/lurus-identity/web"
 )
 
@@ -63,6 +67,17 @@ func main() {
 }
 
 func run(ctx context.Context, cfg *config.Config) error {
+	// --- OpenTelemetry tracing ---
+	tracingShutdown, err := tracing.Init(ctx, cfg.OtelServiceName, cfg.OtelEndpoint)
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracingShutdown(shutCtx)
+	}()
+
 	// --- Database ---
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseDSN), &gorm.Config{})
 	if err != nil {
@@ -102,6 +117,8 @@ func run(ctx context.Context, cfg *config.Config) error {
 	walletRepo := repo.NewWalletRepo(db)
 	productRepo := repo.NewProductRepo(db)
 	vipRepo := repo.NewVIPRepo(db)
+	invoiceRepo := repo.NewInvoiceRepo(db)
+	refundRepo := repo.NewRefundRepo(db)
 
 	// --- Cache ---
 	entCache := cache.NewEntitlementCache(rdb, cfg.CacheEntitlementTTL)
@@ -113,12 +130,15 @@ func run(ctx context.Context, cfg *config.Config) error {
 	entSvc := app.NewEntitlementService(subRepo, productRepo, entCache)
 	subSvc := app.NewSubscriptionService(subRepo, productRepo, entSvc, cfg.GracePeriodDays)
 	accountSvc := app.NewAccountService(accountRepo, walletRepo, vipRepo)
+	invoiceSvc := app.NewInvoiceService(invoiceRepo, walletRepo)
+	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo)
 
 	// --- NATS Publisher ---
 	publisher, err := identitynats.NewPublisher(nc)
 	if err != nil {
 		return fmt.Errorf("nats publisher: %w", err)
 	}
+	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher)
 
 	// --- NATS Consumer ---
 	consumer, err := identitynats.NewConsumer(nc, vipSvc)
@@ -162,6 +182,10 @@ func run(ctx context.Context, cfg *config.Config) error {
 	productH := handler.NewProductHandler(productSvc)
 	internalH := handler.NewInternalHandler(accountSvc, subSvc, entSvc, vipSvc)
 	webhookH := handler.NewWebhookHandler(walletSvc, subSvc, epayProvider, stripeProvider, creemProvider, webhookDeduper)
+	invoiceH := handler.NewInvoiceHandler(invoiceSvc)
+	refundH := handler.NewRefundHandler(refundSvc)
+	adminOpsH := handler.NewAdminOpsHandler(referralSvc)
+	reportH := handler.NewReportHandler(db)
 
 	engine := router.Build(router.Deps{
 		Accounts:      accountH,
@@ -170,6 +194,10 @@ func run(ctx context.Context, cfg *config.Config) error {
 		Products:      productH,
 		Internal:      internalH,
 		Webhooks:      webhookH,
+		Invoices:      invoiceH,
+		Refunds:       refundH,
+		AdminOps:      adminOpsH,
+		Reports:       reportH,
 		InternalKey:   cfg.InternalAPIKey,
 		JWT:           jwtMiddleware,
 		RateLimit:     rateLimiter,
@@ -178,8 +206,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	// Prometheus /metrics endpoint (unauthenticated, scraped internally by Prometheus).
 	engine.GET("/metrics", gin.WrapH(metrics.Handler()))
 
-	// Instrument all routes with Prometheus HTTP metrics.
+	// Instrument all routes with Prometheus HTTP metrics and OTel traces.
 	engine.Use(metrics.HTTPMiddleware())
+	engine.Use(otelgin.Middleware(cfg.OtelServiceName))
 
 	// --- SPA static files (web/dist embedded) ---
 	webFS, err := fs.Sub(lurusweb.Dist, "dist")
@@ -199,8 +228,18 @@ func run(ctx context.Context, cfg *config.Config) error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// --- Cron Job ---
+	// --- Email Sender ---
+	var emailSender email.Sender
+	if cfg.EmailSMTPHost != "" {
+		emailSender = email.NewSMTPSender(cfg.EmailSMTPHost, cfg.EmailSMTPPort, cfg.EmailSMTPUser, cfg.EmailSMTPPass, cfg.EmailFrom)
+	} else {
+		emailSender = email.NoopSender{}
+	}
+
+	// --- Cron Jobs ---
 	expiryJob := cron.NewExpiryJob(subSvc, publisher, rdb)
+	renewalJob := cron.NewRenewalJob(subSvc, subRepo, productRepo, walletSvc, publisher, rdb, time.Hour)
+	notifJob := cron.NewNotificationJob(subRepo, accountRepo, emailSender, rdb, 24*time.Hour)
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -221,6 +260,16 @@ func run(ctx context.Context, cfg *config.Config) error {
 	// Subscription expiry cron
 	g.Go(func() error {
 		return expiryJob.Run(gctx)
+	})
+
+	// Subscription auto-renewal cron
+	g.Go(func() error {
+		return renewalJob.Run(gctx)
+	})
+
+	// Expiry notification email cron
+	g.Go(func() error {
+		return notifJob.Run(gctx)
 	})
 
 	// Graceful shutdown trigger

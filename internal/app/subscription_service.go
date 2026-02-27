@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/tracing"
 )
 
 // SubscriptionService manages the lifecycle of product subscriptions.
@@ -25,6 +26,9 @@ func NewSubscriptionService(subs subscriptionStore, plans planStore, ents *Entit
 
 // Activate creates or renews a subscription and syncs entitlements.
 func (s *SubscriptionService) Activate(ctx context.Context, accountID int64, productID string, planID int64, paymentMethod, externalSubID string) (*entity.Subscription, error) {
+	ctx, span := tracing.Tracer("lurus-identity").Start(ctx, "subscription.activate")
+	defer span.End()
+
 	plan, err := s.plans.GetPlanByID(ctx, planID)
 	if err != nil || plan == nil {
 		return nil, fmt.Errorf("plan %d not found", planID)
@@ -69,6 +73,9 @@ func (s *SubscriptionService) Activate(ctx context.Context, accountID int64, pro
 
 // Expire marks a subscription as expired and enters the grace period.
 func (s *SubscriptionService) Expire(ctx context.Context, subID int64) error {
+	ctx, span := tracing.Tracer("lurus-identity").Start(ctx, "subscription.expire")
+	defer span.End()
+
 	sub, err := s.subs.GetByID(ctx, subID)
 	if err != nil || sub == nil {
 		return fmt.Errorf("subscription %d not found", subID)
@@ -84,6 +91,9 @@ func (s *SubscriptionService) Expire(ctx context.Context, subID int64) error {
 
 // EndGrace transitions a grace-period subscription to expired and resets entitlements.
 func (s *SubscriptionService) EndGrace(ctx context.Context, subID int64) error {
+	ctx, span := tracing.Tracer("lurus-identity").Start(ctx, "subscription.end_grace")
+	defer span.End()
+
 	sub, err := s.subs.GetByID(ctx, subID)
 	if err != nil || sub == nil {
 		return fmt.Errorf("subscription %d not found", subID)

@@ -15,7 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/tracing"
 )
 
 const (
@@ -107,6 +110,10 @@ func (c *JWKSCache) Refresh(ctx context.Context) error {
 }
 
 func (c *JWKSCache) refresh(ctx context.Context) error {
+	ctx, span := tracing.Tracer("lurus-identity").Start(ctx, "jwks.refresh",
+		trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
 		return fmt.Errorf("auth: build jwks request: %w", err)

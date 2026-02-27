@@ -1,5 +1,5 @@
 project: lurus-identity
-last_updated: "2026-02-27"
+last_updated: "2026-02-27"  # Sprint 2 Code Complete
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EPICS
@@ -88,35 +88,35 @@ epics:
 
   - id: epic-11
     name: 安全加固
-    status: in_progress
+    status: done
     priority: P0
     stories_total: 4
     stories_done: 4
-    notes: "JWKS JWT 验证、Admin 角色检查、限流、Webhook 幂等 — Code Complete"
+    notes: "JWKS JWT 验证、Admin 角色检查、限流、Webhook 幂等 — Done"
 
   - id: epic-12
     name: 订阅自动化
-    status: in_progress
+    status: done
     priority: P0
     stories_total: 4
-    stories_done: 2
-    notes: "到期 Cron、宽限期降级 Code Complete (Sprint 1)；自动续费、提醒邮件 (Sprint 2)"
+    stories_done: 4
+    notes: "到期 Cron、宽限期降级 (Sprint 1)；自动续费 + 提醒邮件 (Sprint 2) — Done"
 
   - id: epic-13
     name: 可观测性
-    status: in_progress
+    status: done
     priority: P0
     stories_total: 3
-    stories_done: 2
-    notes: "Prometheus metrics、审计日志 Code Complete (Sprint 1)；Jaeger tracing (Sprint 2)"
+    stories_done: 3
+    notes: "Prometheus metrics、审计日志 (Sprint 1)；Jaeger/OTel 分布式追踪 (Sprint 2) — Done"
 
   - id: epic-14
     name: 财务合规
-    status: planned
+    status: in_progress
     priority: P1
     stories_total: 4
-    stories_done: 0
-    notes: "发票生成、退款工作流、GDPR 数据导出/删除 — Sprint 2+"
+    stories_done: 2
+    notes: "发票生成、退款工作流 Code Complete (Sprint 2)；GDPR 数据导出/删除 — Sprint 3"
 
   - id: epic-15
     name: 企业账号与 RBAC
@@ -128,22 +128,30 @@ epics:
 
   - id: epic-16
     name: 运营工具
-    status: planned
+    status: in_progress
     priority: P2
     stories_total: 3
-    stories_done: 0
-    notes: "批量发码、财务对账报表、运营数据看板 — Sprint 2+"
+    stories_done: 2
+    notes: "批量发码、财务对账报表 Code Complete (Sprint 2)；运营数据看板 — Sprint 3"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CURRENT SPRINT
 # ─────────────────────────────────────────────────────────────────────────────
+completed_sprints:
+  - id: sprint-1
+    name: "生产部署就绪"
+    start_date: "2026-03-01"
+    end_date: "2026-03-14"
+    velocity_delivered: 22
+    result: "done — Epic 11/12/13 安全+自动化+可观测性 Code Complete"
+
 current_sprint:
-  id: sprint-1
-  name: "生产部署就绪"
-  start_date: "2026-03-01"
-  end_date: "2026-03-14"
-  goal: "完成安全加固、K8s 部署就绪、基础可观测性，使 lurus-identity 具备生产上线条件"
-  velocity_target: 22  # story points
+  id: sprint-2
+  name: "财务合规 + 运营工具"
+  start_date: "2026-03-15"
+  end_date: "2026-03-28"
+  goal: "完成财务合规（发票/退款）、运营工具（批量发码/报表）、分布式追踪"
+  velocity_target: 20  # story points
 
   stories:
     - id: "11.1"
@@ -259,50 +267,66 @@ current_sprint:
         - "Liveness/Readiness probe 配置，HPA 初始配置"
         - "ArgoCD Application manifest 已加入 appset-services.yaml"
 
+    - id: "12.3"
+      title: "自动续费"
+      epic: epic-12
+      status: done
+      priority: P1
+      points: 3
+      notes: "每小时 cron，指数退避重试（1h/4h/12h），Redis 分布式锁"
+
+    - id: "12.4"
+      title: "到期提醒邮件"
+      epic: epic-12
+      status: done
+      priority: P1
+      points: 2
+      notes: "7/3/1 天提醒，Redis dedup，SMTP/Noop sender"
+
+    - id: "13.3"
+      title: "Jaeger 分布式追踪"
+      epic: epic-13
+      status: done
+      priority: P1
+      points: 3
+      notes: "OTel SDK + OTLP gRPC，noop when endpoint empty，otelgin 中间件，key spans"
+
+    - id: "14.1"
+      title: "发票生成"
+      epic: epic-14
+      status: done
+      priority: P1
+      points: 4
+      notes: "幂等生成，IDOR 保护，JSON API，billing.invoices 表"
+
+    - id: "14.2"
+      title: "退款工作流"
+      epic: epic-14
+      status: done
+      priority: P1
+      points: 3
+      notes: "状态机 pending→approved→completed，7 天窗口，Credit 钱包，NATS 事件"
+
+    - id: "16.1"
+      title: "批量发码"
+      epic: epic-16
+      status: done
+      priority: P1
+      points: 2
+      notes: "最多 1000 个，crypto/rand 生成，JSON/CSV 响应，CreateInBatches"
+
+    - id: "16.2"
+      title: "财务对账报表"
+      epic: epic-16
+      status: done
+      priority: P1
+      points: 3
+      notes: "date×product×method 聚合，白名单防注入，JSON/CSV 导出"
+
 # ─────────────────────────────────────────────────────────────────────────────
-# BACKLOG（Sprint 2 及后续）
+# BACKLOG（Sprint 3 及后续）
 # ─────────────────────────────────────────────────────────────────────────────
 backlog:
-  - id: "12.3"
-    title: "自动续费"
-    epic: epic-12
-    priority: P1
-    points: 3
-    sprint: sprint-2
-    notes: "订阅到期前触发自动扣款，失败后重试策略（3次，指数退避）"
-
-  - id: "12.4"
-    title: "到期提醒邮件"
-    epic: epic-12
-    priority: P1
-    points: 2
-    sprint: sprint-2
-    notes: "到期前 7 天、3 天、1 天发送提醒；邮件模板可配置"
-
-  - id: "13.3"
-    title: "Jaeger 分布式追踪"
-    epic: epic-13
-    priority: P1
-    points: 3
-    sprint: sprint-2
-    notes: "OpenTelemetry SDK 接入，关键链路（支付/权益查询）添加 span"
-
-  - id: "14.1"
-    title: "发票生成"
-    epic: epic-14
-    priority: P1
-    points: 4
-    sprint: sprint-2
-    notes: "PDF 发票生成，支持中英文；发票信息关联订单存储"
-
-  - id: "14.2"
-    title: "退款工作流"
-    epic: epic-14
-    priority: P1
-    points: 3
-    sprint: sprint-2
-    notes: "退款申请、审核、执行流程；支持全额/部分退款；钱包余额同步"
-
   - id: "14.3"
     title: "GDPR 数据导出与删除"
     epic: epic-14
@@ -335,22 +359,6 @@ backlog:
     sprint: sprint-3
     notes: "基于角色的资源访问控制，支持自定义角色"
 
-  - id: "16.1"
-    title: "批量发码工具"
-    epic: epic-16
-    priority: P1
-    points: 2
-    sprint: sprint-2
-    notes: "运营后台批量生成兑换码，支持 CSV 导出"
-
-  - id: "16.2"
-    title: "财务对账报表"
-    epic: epic-16
-    priority: P1
-    points: 3
-    sprint: sprint-2
-    notes: "按日/月汇总支付流水、退款、钱包变动；支持 CSV 导出"
-
   - id: "16.3"
     title: "运营数据看板"
     epic: epic-16
@@ -363,21 +371,20 @@ backlog:
 # METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 metrics:
-  epics_done: 10
-  epics_in_progress: 0
-  epics_planned: 6
+  epics_done: 13       # 1-13 all done
+  epics_in_progress: 2  # 14, 16
+  epics_planned: 1      # 15
   epics_total: 16
 
-  # Story counts are estimates; finalize after Epic 1-10 story breakdown
-  stories_done: 43       # Epic 1-10 完成的 story 估计数
-  stories_in_sprint: 9   # Sprint 1 stories
-  stories_backlog: 12
-  stories_total: 64      # 估计总数
+  stories_done: 60      # Epic 1-10 (43) + Sprint 1 (9) + Sprint 2 (8)
+  stories_in_sprint: 8  # Sprint 2 stories (all done)
+  stories_backlog: 8    # Sprint 3: 14.3, 15.1-3, 16.3 + future
+  stories_total: 68
 
   # Code quality
-  coverage_app: "77%"    # go test ./internal/app/...
+  coverage_app: "85.5%"  # go test ./internal/app/... (Sprint 2 final)
   coverage_target_app: "80%"
-  build_go: "passing"    # CGO_ENABLED=0 go build ./cmd/server
+  build_go: "passing"    # go build ./...
   build_frontend: "passing"  # bun run build
 
   # Deployment

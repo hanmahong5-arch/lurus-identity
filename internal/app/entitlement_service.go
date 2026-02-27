@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"strconv"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/tracing"
 )
 
 // EntitlementService computes and caches per-account product entitlements.
@@ -22,9 +25,14 @@ func NewEntitlementService(sub subscriptionStore, plan planStore, c entitlementC
 
 // Get returns entitlements for an account+product, serving from cache when available.
 func (s *EntitlementService) Get(ctx context.Context, accountID int64, productID string) (map[string]string, error) {
+	ctx, span := tracing.Tracer("lurus-identity").Start(ctx, "entitlement.get")
+	defer span.End()
+
 	if em, err := s.cache.Get(ctx, accountID, productID); err == nil && em != nil {
+		span.SetAttributes(attribute.Bool("cache.hit", true))
 		return em, nil
 	}
+	span.SetAttributes(attribute.Bool("cache.hit", false))
 	return s.Refresh(ctx, accountID, productID)
 }
 

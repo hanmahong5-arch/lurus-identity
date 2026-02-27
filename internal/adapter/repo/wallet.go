@@ -175,6 +175,14 @@ func (r *WalletRepo) CreateRedemptionCode(ctx context.Context, rc *entity.Redemp
 	return r.db.WithContext(ctx).Create(rc).Error
 }
 
+// BulkCreate inserts multiple redemption codes in batches of 100.
+func (r *WalletRepo) BulkCreate(ctx context.Context, codes []entity.RedemptionCode) error {
+	if len(codes) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).CreateInBatches(codes, 100).Error
+}
+
 // GenerateOrderNo creates a unique order number: "LO" + date + 6-digit sequence.
 func GenerateOrderNo(accountID int64) string {
 	return fmt.Sprintf("LO%s%06d", time.Now().UTC().Format("20060102"), accountID%1000000)

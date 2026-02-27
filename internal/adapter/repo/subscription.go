@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 	"gorm.io/gorm"
@@ -78,6 +79,26 @@ func (r *SubscriptionRepo) ListGraceExpired(ctx context.Context) ([]entity.Subsc
 		Where("status = ? AND grace_until IS NOT NULL AND grace_until < NOW()", entity.SubStatusGrace).
 		Find(&list).Error
 	return list, err
+}
+
+// ListDueForRenewal returns active subscriptions that have auto_renew=true and are
+// expiring within the next 24 hours, have fewer than 3 renewal attempts, and whose
+// next_renewal_at is NULL or has passed.
+func (r *SubscriptionRepo) ListDueForRenewal(ctx context.Context) ([]entity.Subscription, error) {
+	var list []entity.Subscription
+	now := time.Now()
+	err := r.db.WithContext(ctx).
+		Where("auto_renew = true AND status = ? AND expires_at BETWEEN ? AND ? AND renewal_attempts < 3 AND (next_renewal_at IS NULL OR next_renewal_at <= ?)",
+			entity.SubStatusActive, now, now.Add(24*time.Hour), now).
+		Find(&list).Error
+	return list, err
+}
+
+// UpdateRenewalState persists the renewal attempt counter and next retry timestamp.
+func (r *SubscriptionRepo) UpdateRenewalState(ctx context.Context, subID int64, attempts int, nextAt *time.Time) error {
+	return r.db.WithContext(ctx).Model(&entity.Subscription{}).
+		Where("id = ?", subID).
+		Updates(map[string]any{"renewal_attempts": attempts, "next_renewal_at": nextAt}).Error
 }
 
 // UpsertEntitlement creates or updates a single entitlement row.

@@ -229,7 +229,15 @@ func run(ctx context.Context, cfg *config.Config) error {
 				return
 			}
 		}
-		c.FileFromFS("index.html", http.FS(webFS))
+		// Read index.html directly — do NOT use c.FileFromFS or http.FileServer here.
+		// net/http.serveFile redirects any URL path ending in "/index.html" to "./"
+		// which would cause an infinite redirect loop at the root path.
+		data, err := fs.ReadFile(webFS, "index.html")
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	})
 
 	srv := &http.Server{

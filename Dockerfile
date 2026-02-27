@@ -1,3 +1,11 @@
+FROM oven/bun:1 AS frontend
+
+WORKDIR /web
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web/ .
+RUN bun run build
+
 FROM golang:1.25-alpine AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
@@ -7,6 +15,9 @@ WORKDIR /build
 # Download dependencies first (cache layer)
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Copy frontend build output
+COPY --from=frontend /web/dist ./web/dist
 
 # Build
 COPY . .

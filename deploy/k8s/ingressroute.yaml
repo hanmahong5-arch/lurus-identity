@@ -12,11 +12,6 @@ spec:
   routes:
     - match: Host(`id.lurus.cn`)
       kind: Rule
-      middlewares:
-        - name: global-ratelimit
-          namespace: lurus-system
-        - name: circuit-breaker
-          namespace: lurus-system
       services:
         - name: identity-service
           port: 18104

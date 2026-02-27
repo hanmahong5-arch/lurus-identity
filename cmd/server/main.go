@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -219,8 +220,16 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("embed web/dist: %w", err)
 	}
 	engine.NoRoute(func(c *gin.Context) {
-		// Serve index.html for all unmatched routes (SPA client-side routing).
-		http.FileServerFS(webFS).ServeHTTP(c.Writer, c.Request)
+		// Serve static assets (JS/CSS/fonts) when the file exists in dist/.
+		// Fall back to index.html for SPA client-side routes (/wallet, /callback, etc.).
+		reqPath := strings.TrimPrefix(c.Request.URL.Path, "/")
+		if reqPath != "" {
+			if _, err := webFS.Open(reqPath); err == nil {
+				http.FileServerFS(webFS).ServeHTTP(c.Writer, c.Request)
+				return
+			}
+		}
+		c.FileFromFS("index.html", http.FS(webFS))
 	})
 
 	srv := &http.Server{

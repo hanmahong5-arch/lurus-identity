@@ -11,6 +11,18 @@ cov.out
 web/dist/
 web/node_modules/
 
+# Frontend local env (use web/.env.production for CI)
+web/.env.local
+
+# Playwright (setup scripts only, not needed in CI)
+node_modules/
+package.json
+bun.lock
+
+# Zitadel setup artifacts
+web/.zitadel-*.json
+web/.zitadel-*.png
+
 # Go workspace
 /vendor/
 

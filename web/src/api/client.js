@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { login } from '../auth'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -14,12 +15,15 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Redirect to Zitadel on 401
+// On 401: initiate OIDC PKCE login flow
 client.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      window.location.href = 'https://auth.lurus.cn'
+      // Don't redirect if already on /callback (avoids loop)
+      if (!window.location.pathname.startsWith('/callback')) {
+        login()
+      }
     }
     return Promise.reject(err)
   }

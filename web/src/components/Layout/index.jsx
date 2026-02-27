@@ -10,6 +10,7 @@ import {
 import { useNavigate, useLocation, Outlet } from 'react-router-dom'
 import { useStore } from '../../store'
 import LurusAvatar from '../LurusAvatar'
+import { logout } from '../../auth'
 
 const { Header, Sider, Content } = SemiLayout
 
@@ -21,8 +22,7 @@ const NAV_ITEMS = [
 ]
 
 function handleLogout() {
-  localStorage.removeItem('token')
-  window.location.href = 'https://auth.lurus.cn/oidc/v1/end_session'
+  logout()
 }
 
 export default function Layout() {

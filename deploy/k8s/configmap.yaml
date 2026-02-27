@@ -7,7 +7,7 @@ data:
   PORT: "18104"
   TZ: "Asia/Shanghai"
   ENV: "production"
-  REDIS_ADDR: "redis.messaging.svc:6379"
+  REDIS_ADDR: "redis.lurus-system.svc:6379"
   REDIS_DB: "3"
   NATS_ADDR: "nats://nats.messaging.svc:4222"
   RATE_LIMIT_IP_PER_MINUTE: "120"

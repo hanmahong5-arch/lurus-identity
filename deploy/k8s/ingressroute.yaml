@@ -10,7 +10,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`id.lurus.cn`)
+    - match: Host(`identity.lurus.cn`)
       kind: Rule
       services:
         - name: identity-service

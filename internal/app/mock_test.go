@@ -1,0 +1,591 @@
+package app
+
+// In-memory mock implementations of repo interfaces for testing.
+// No network, no DB — all state lives in plain maps.
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
+)
+
+// ── accountStore mock ─────────────────────────────────────────────────────────
+
+type mockAccountStore struct {
+	mu       sync.Mutex
+	byID     map[int64]*entity.Account
+	byEmail  map[string]*entity.Account
+	bySub    map[string]*entity.Account
+	nextID   int64
+	bindings []entity.OAuthBinding
+}
+
+func newMockAccountStore() *mockAccountStore {
+	return &mockAccountStore{
+		byID:   make(map[int64]*entity.Account),
+		byEmail: make(map[string]*entity.Account),
+		bySub:  make(map[string]*entity.Account),
+		nextID: 1,
+	}
+}
+
+func (m *mockAccountStore) Create(_ context.Context, a *entity.Account) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a.ID = m.nextID
+	m.nextID++
+	a.CreatedAt = time.Now()
+	a.UpdatedAt = time.Now()
+	cp := *a
+	m.byID[cp.ID] = &cp
+	m.byEmail[cp.Email] = &cp
+	if cp.ZitadelSub != "" {
+		m.bySub[cp.ZitadelSub] = &cp
+	}
+	return nil
+}
+
+func (m *mockAccountStore) Update(_ context.Context, a *entity.Account) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a.UpdatedAt = time.Now()
+	cp := *a
+	m.byID[cp.ID] = &cp
+	m.byEmail[cp.Email] = &cp
+	if cp.ZitadelSub != "" {
+		m.bySub[cp.ZitadelSub] = &cp
+	}
+	return nil
+}
+
+func (m *mockAccountStore) GetByID(_ context.Context, id int64) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (m *mockAccountStore) GetByEmail(_ context.Context, email string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.byEmail[email]
+	if !ok {
+		return nil, nil
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (m *mockAccountStore) GetByZitadelSub(_ context.Context, sub string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.bySub[sub]
+	if !ok {
+		return nil, nil
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (m *mockAccountStore) GetByLurusID(_ context.Context, lurusID string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if a.LurusID == lurusID {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAccountStore) List(_ context.Context, _ string, _, _ int) ([]*entity.Account, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*entity.Account
+	for _, a := range m.byID {
+		cp := *a
+		out = append(out, &cp)
+	}
+	return out, int64(len(out)), nil
+}
+
+func (m *mockAccountStore) UpsertOAuthBinding(_ context.Context, b *entity.OAuthBinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bindings = append(m.bindings, *b)
+	return nil
+}
+
+// ── walletStore mock ──────────────────────────────────────────────────────────
+
+type mockWalletStore struct {
+	mu      sync.Mutex
+	wallets map[int64]*entity.Wallet
+	txs     []entity.WalletTransaction
+	orders  map[string]*entity.PaymentOrder
+	codes   map[string]*entity.RedemptionCode
+	nextWID int64
+}
+
+func newMockWalletStore() *mockWalletStore {
+	return &mockWalletStore{
+		wallets: make(map[int64]*entity.Wallet),
+		orders:  make(map[string]*entity.PaymentOrder),
+		codes:   make(map[string]*entity.RedemptionCode),
+		nextWID: 1,
+	}
+}
+
+func (m *mockWalletStore) GetOrCreate(_ context.Context, accountID int64) (*entity.Wallet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if w, ok := m.wallets[accountID]; ok {
+		cp := *w
+		return &cp, nil
+	}
+	w := &entity.Wallet{ID: m.nextWID, AccountID: accountID}
+	m.nextWID++
+	m.wallets[accountID] = w
+	cp := *w
+	return &cp, nil
+}
+
+func (m *mockWalletStore) GetByAccountID(_ context.Context, accountID int64) (*entity.Wallet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.wallets[accountID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
+func (m *mockWalletStore) Credit(_ context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.wallets[accountID]
+	if !ok {
+		w = &entity.Wallet{ID: m.nextWID, AccountID: accountID}
+		m.nextWID++
+		m.wallets[accountID] = w
+	}
+	w.Balance += amount
+	if txType == entity.TxTypeTopup {
+		w.LifetimeTopup += amount
+	}
+	tx := entity.WalletTransaction{
+		ID: int64(len(m.txs) + 1), WalletID: w.ID, AccountID: accountID,
+		Type: txType, Amount: amount, BalanceAfter: w.Balance,
+		ProductID: productID, ReferenceType: refType, ReferenceID: refID, Description: desc,
+	}
+	m.txs = append(m.txs, tx)
+	cp := tx
+	return &cp, nil
+}
+
+func (m *mockWalletStore) Debit(_ context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.wallets[accountID]
+	if !ok {
+		return nil, fmt.Errorf("wallet not found for account %d", accountID)
+	}
+	if w.Balance < amount {
+		return nil, fmt.Errorf("insufficient balance: have %.4f, need %.4f", w.Balance, amount)
+	}
+	w.Balance -= amount
+	w.LifetimeSpend += amount
+	tx := entity.WalletTransaction{
+		ID: int64(len(m.txs) + 1), WalletID: w.ID, AccountID: accountID,
+		Type: txType, Amount: -amount, BalanceAfter: w.Balance,
+		ProductID: productID, ReferenceType: refType, ReferenceID: refID, Description: desc,
+	}
+	m.txs = append(m.txs, tx)
+	cp := tx
+	return &cp, nil
+}
+
+func (m *mockWalletStore) ListTransactions(_ context.Context, accountID int64, _, _ int) ([]entity.WalletTransaction, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.WalletTransaction
+	for _, tx := range m.txs {
+		if tx.AccountID == accountID {
+			out = append(out, tx)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+func (m *mockWalletStore) CreatePaymentOrder(_ context.Context, o *entity.PaymentOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *o
+	m.orders[cp.OrderNo] = &cp
+	return nil
+}
+
+func (m *mockWalletStore) UpdatePaymentOrder(_ context.Context, o *entity.PaymentOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *o
+	m.orders[cp.OrderNo] = &cp
+	return nil
+}
+
+func (m *mockWalletStore) GetPaymentOrderByNo(_ context.Context, orderNo string) (*entity.PaymentOrder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.orders[orderNo]
+	if !ok {
+		return nil, nil
+	}
+	cp := *o
+	return &cp, nil
+}
+
+func (m *mockWalletStore) GetRedemptionCode(_ context.Context, code string) (*entity.RedemptionCode, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rc, ok := m.codes[code]
+	if !ok {
+		return nil, nil
+	}
+	cp := *rc
+	return &cp, nil
+}
+
+func (m *mockWalletStore) UpdateRedemptionCode(_ context.Context, rc *entity.RedemptionCode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *rc
+	m.codes[cp.Code] = &cp
+	return nil
+}
+
+func (m *mockWalletStore) ListOrders(_ context.Context, accountID int64, _, _ int) ([]entity.PaymentOrder, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.PaymentOrder
+	for _, o := range m.orders {
+		if o.AccountID == accountID {
+			out = append(out, *o)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+// ── vipStore mock ─────────────────────────────────────────────────────────────
+
+type mockVIPStore struct {
+	mu      sync.Mutex
+	viP     map[int64]*entity.AccountVIP
+	configs []entity.VIPLevelConfig
+}
+
+func newMockVIPStore(configs []entity.VIPLevelConfig) *mockVIPStore {
+	return &mockVIPStore{
+		viP:     make(map[int64]*entity.AccountVIP),
+		configs: configs,
+	}
+}
+
+func (m *mockVIPStore) GetOrCreate(_ context.Context, accountID int64) (*entity.AccountVIP, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.viP[accountID]
+	if !ok {
+		v = &entity.AccountVIP{AccountID: accountID}
+		m.viP[accountID] = v
+	}
+	cp := *v
+	return &cp, nil
+}
+
+func (m *mockVIPStore) Update(_ context.Context, v *entity.AccountVIP) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v.UpdatedAt = time.Now()
+	cp := *v
+	m.viP[v.AccountID] = &cp
+	return nil
+}
+
+func (m *mockVIPStore) ListConfigs(_ context.Context) ([]entity.VIPLevelConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configs, nil
+}
+
+// ── subscriptionStore mock ────────────────────────────────────────────────────
+
+type mockSubStore struct {
+	mu           sync.Mutex
+	subs         map[int64]*entity.Subscription
+	entitlements map[string]*entity.AccountEntitlement // key: accountID:productID:key
+	nextID       int64
+}
+
+func newMockSubStore() *mockSubStore {
+	return &mockSubStore{
+		subs:         make(map[int64]*entity.Subscription),
+		entitlements: make(map[string]*entity.AccountEntitlement),
+		nextID:       1,
+	}
+}
+
+func (m *mockSubStore) Create(_ context.Context, s *entity.Subscription) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s.ID = m.nextID
+	m.nextID++
+	cp := *s
+	m.subs[cp.ID] = &cp
+	return nil
+}
+
+func (m *mockSubStore) Update(_ context.Context, s *entity.Subscription) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *s
+	m.subs[cp.ID] = &cp
+	return nil
+}
+
+func (m *mockSubStore) GetByID(_ context.Context, id int64) (*entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.subs[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *s
+	return &cp, nil
+}
+
+func (m *mockSubStore) GetActive(_ context.Context, accountID int64, productID string) (*entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.subs {
+		if s.AccountID == accountID && s.ProductID == productID &&
+			(s.Status == entity.SubStatusActive || s.Status == entity.SubStatusGrace || s.Status == entity.SubStatusTrial) {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockSubStore) ListByAccount(_ context.Context, accountID int64) ([]entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Subscription
+	for _, s := range m.subs {
+		if s.AccountID == accountID {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockSubStore) UpsertEntitlement(_ context.Context, e *entity.AccountEntitlement) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := fmt.Sprintf("%d:%s:%s", e.AccountID, e.ProductID, e.Key)
+	cp := *e
+	m.entitlements[k] = &cp
+	return nil
+}
+
+func (m *mockSubStore) GetEntitlements(_ context.Context, accountID int64, productID string) ([]entity.AccountEntitlement, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := fmt.Sprintf("%d:%s:", accountID, productID)
+	var out []entity.AccountEntitlement
+	for k, e := range m.entitlements {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			out = append(out, *e)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockSubStore) ListActiveExpired(_ context.Context) ([]entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	var out []entity.Subscription
+	for _, s := range m.subs {
+		if s.Status == entity.SubStatusActive && s.ExpiresAt != nil && s.ExpiresAt.Before(now) {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockSubStore) ListGraceExpired(_ context.Context) ([]entity.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	var out []entity.Subscription
+	for _, s := range m.subs {
+		if s.Status == entity.SubStatusGrace && s.GraceUntil != nil && s.GraceUntil.Before(now) {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockSubStore) DeleteEntitlements(_ context.Context, accountID int64, productID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := fmt.Sprintf("%d:%s:", accountID, productID)
+	for k := range m.entitlements {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			delete(m.entitlements, k)
+		}
+	}
+	return nil
+}
+
+// ── planStore mock ────────────────────────────────────────────────────────────
+
+type mockPlanStore struct {
+	mu       sync.Mutex
+	products map[string]*entity.Product
+	plans    map[int64]*entity.ProductPlan
+	nextPID  int64
+}
+
+func newMockPlanStore() *mockPlanStore {
+	return &mockPlanStore{
+		products: make(map[string]*entity.Product),
+		plans:    make(map[int64]*entity.ProductPlan),
+		nextPID:  1,
+	}
+}
+
+func (m *mockPlanStore) GetByID(_ context.Context, id string) (*entity.Product, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.products[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *p
+	return &cp, nil
+}
+
+func (m *mockPlanStore) ListActive(_ context.Context) ([]entity.Product, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Product
+	for _, p := range m.products {
+		if p.Status == 1 {
+			out = append(out, *p)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockPlanStore) Create(_ context.Context, p *entity.Product) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *p
+	m.products[cp.ID] = &cp
+	return nil
+}
+
+func (m *mockPlanStore) Update(_ context.Context, p *entity.Product) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *p
+	m.products[cp.ID] = &cp
+	return nil
+}
+
+func (m *mockPlanStore) GetPlanByID(_ context.Context, id int64) (*entity.ProductPlan, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.plans[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *p
+	return &cp, nil
+}
+
+func (m *mockPlanStore) ListPlans(_ context.Context, productID string) ([]entity.ProductPlan, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.ProductPlan
+	for _, p := range m.plans {
+		if p.ProductID == productID && p.Status == 1 {
+			out = append(out, *p)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockPlanStore) CreatePlan(_ context.Context, p *entity.ProductPlan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p.ID = m.nextPID
+	m.nextPID++
+	cp := *p
+	m.plans[cp.ID] = &cp
+	return nil
+}
+
+func (m *mockPlanStore) UpdatePlan(_ context.Context, p *entity.ProductPlan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *p
+	m.plans[cp.ID] = &cp
+	return nil
+}
+
+// ── entitlementCache mock ─────────────────────────────────────────────────────
+
+type mockCache struct {
+	mu   sync.Mutex
+	data map[string]map[string]string
+}
+
+func newMockCache() *mockCache {
+	return &mockCache{data: make(map[string]map[string]string)}
+}
+
+func (m *mockCache) Get(_ context.Context, accountID int64, productID string) (map[string]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := fmt.Sprintf("%d:%s", accountID, productID)
+	v, ok := m.data[k]
+	if !ok {
+		return nil, nil
+	}
+	return v, nil
+}
+
+func (m *mockCache) Set(_ context.Context, accountID int64, productID string, em map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[fmt.Sprintf("%d:%s", accountID, productID)] = em
+	return nil
+}
+
+func (m *mockCache) Invalidate(_ context.Context, accountID int64, productID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, fmt.Sprintf("%d:%s", accountID, productID))
+	return nil
+}

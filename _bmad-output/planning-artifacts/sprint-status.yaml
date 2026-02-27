@@ -1,0 +1,387 @@
+project: lurus-identity
+last_updated: "2026-02-27"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EPICS
+# Status: done | in_progress | planned
+# ─────────────────────────────────────────────────────────────────────────────
+epics:
+  - id: epic-1
+    name: 账号身份与认证
+    status: done
+    priority: P0
+    stories_total: 5
+    stories_done: 5
+    notes: "账号注册/登录/Zitadel sub 绑定、账号查询接口全部 Code Complete"
+
+  - id: epic-2
+    name: 产品与方案管理
+    status: done
+    priority: P0
+    stories_total: 4
+    stories_done: 4
+    notes: "产品定义、定价方案、JSONB features 存储，Code Complete"
+
+  - id: epic-3
+    name: 订阅管理
+    status: done
+    priority: P0
+    stories_total: 5
+    stories_done: 5
+    notes: "订阅创建/变更/取消/状态机，Code Complete"
+
+  - id: epic-4
+    name: 权益与配额
+    status: done
+    priority: P0
+    stories_total: 4
+    stories_done: 4
+    notes: "权益查询、Redis 5min TTL 缓存、LLM 用量上报，Code Complete"
+
+  - id: epic-5
+    name: 钱包与积分
+    status: done
+    priority: P0
+    stories_total: 4
+    stories_done: 4
+    notes: "钱包充值/扣减、幂等流水、余额查询，Code Complete"
+
+  - id: epic-6
+    name: 支付集成
+    status: done
+    priority: P0
+    stories_total: 5
+    stories_done: 5
+    notes: "Creem/支付宝支付回调、订单创建、支付状态同步，Code Complete"
+
+  - id: epic-7
+    name: VIP 会员体系
+    status: done
+    priority: P1
+    stories_total: 4
+    stories_done: 4
+    notes: "VIP 等级、权益映射、升降级逻辑，Code Complete"
+
+  - id: epic-8
+    name: 推荐与兑换码
+    status: done
+    priority: P1
+    stories_total: 4
+    stories_done: 4
+    notes: "推荐码生成/绑定、兑换码激活，Code Complete"
+
+  - id: epic-9
+    name: Admin 后台 API
+    status: done
+    priority: P1
+    stories_total: 5
+    stories_done: 5
+    notes: "账号/订阅/钱包管理接口，Code Complete；Admin 角色验证 Sprint 1 补强"
+
+  - id: epic-10
+    name: 前端集成
+    status: done
+    priority: P1
+    stories_total: 3
+    stories_done: 3
+    notes: "React/TypeScript 客户端、bun run build 通过，Code Complete"
+
+  - id: epic-11
+    name: 安全加固
+    status: in_progress
+    priority: P0
+    stories_total: 4
+    stories_done: 4
+    notes: "JWKS JWT 验证、Admin 角色检查、限流、Webhook 幂等 — Code Complete"
+
+  - id: epic-12
+    name: 订阅自动化
+    status: in_progress
+    priority: P0
+    stories_total: 4
+    stories_done: 2
+    notes: "到期 Cron、宽限期降级 Code Complete (Sprint 1)；自动续费、提醒邮件 (Sprint 2)"
+
+  - id: epic-13
+    name: 可观测性
+    status: in_progress
+    priority: P0
+    stories_total: 3
+    stories_done: 2
+    notes: "Prometheus metrics、审计日志 Code Complete (Sprint 1)；Jaeger tracing (Sprint 2)"
+
+  - id: epic-14
+    name: 财务合规
+    status: planned
+    priority: P1
+    stories_total: 4
+    stories_done: 0
+    notes: "发票生成、退款工作流、GDPR 数据导出/删除 — Sprint 2+"
+
+  - id: epic-15
+    name: 企业账号与 RBAC
+    status: planned
+    priority: P2
+    stories_total: 5
+    stories_done: 0
+    notes: "gRPC 接口、企业账号、多角色权限 — Backlog"
+
+  - id: epic-16
+    name: 运营工具
+    status: planned
+    priority: P2
+    stories_total: 3
+    stories_done: 0
+    notes: "批量发码、财务对账报表、运营数据看板 — Sprint 2+"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CURRENT SPRINT
+# ─────────────────────────────────────────────────────────────────────────────
+current_sprint:
+  id: sprint-1
+  name: "生产部署就绪"
+  start_date: "2026-03-01"
+  end_date: "2026-03-14"
+  goal: "完成安全加固、K8s 部署就绪、基础可观测性，使 lurus-identity 具备生产上线条件"
+  velocity_target: 22  # story points
+
+  stories:
+    - id: "11.1"
+      title: "Zitadel JWKS JWT 验证"
+      epic: epic-11
+      status: done
+      priority: P0
+      points: 3
+      owner: ""
+      acceptance_criteria:
+        - "从 Zitadel JWKS 端点动态获取公钥并缓存（TTL 1h，支持强制刷新）"
+        - "JWT 签名、exp、iss、aud 全部验证；无效 token 返回 401"
+        - "单元测试覆盖：正常 token、过期、错误签名、缺失字段"
+
+    - id: "11.2"
+      title: "Admin 角色验证中间件"
+      epic: epic-11
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "Admin API (/admin/v1/*) 必须携带有效 JWT 且 roles 包含 admin"
+        - "非 admin 返回 403，未认证返回 401"
+        - "角色字段来源可通过常量配置，不硬编码字段名"
+
+    - id: "11.3"
+      title: "限流中间件（Rate Limiting）"
+      epic: epic-11
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "基于 Redis 滑动窗口实现，支持 per-IP 与 per-user 两级限流"
+        - "限流阈值通过配置注入（不硬编码）"
+        - "超限返回 429，响应头含 Retry-After"
+        - "限流失败（Redis 不可用）降级为放行并告警，不中断服务"
+
+    - id: "11.4"
+      title: "Webhook 幂等保障"
+      epic: epic-11
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "Webhook 请求以事件 ID 去重，Redis 存储已处理 ID（TTL 24h）"
+        - "重复事件返回 200（幂等），不重复执行业务逻辑"
+        - "Creem/支付宝两类 Webhook 均覆盖"
+        - "单元测试：首次处理、重复处理两个场景"
+
+    - id: "12.1"
+      title: "订阅到期 Cron Job"
+      epic: epic-12
+      status: done
+      priority: P0
+      points: 3
+      owner: ""
+      acceptance_criteria:
+        - "每小时执行一次，扫描 current_period_end < now() 且状态为 active 的订阅"
+        - "标记为 expired，发布 IDENTITY_EVENTS NATS 事件"
+        - "Cron 执行结果写入结构化日志（扫描数、处理数、失败数）"
+        - "并发安全：多副本部署时通过 Redis 分布式锁防止重复执行"
+
+    - id: "12.2"
+      title: "宽限期到期降级"
+      epic: epic-12
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "订阅到期后进入宽限期（时长可配置），宽限期内保留权益"
+        - "宽限期结束后自动降级为 free 方案，权益缓存失效"
+        - "降级事件发布至 NATS，下游可消费"
+
+    - id: "13.1"
+      title: "Prometheus Metrics 暴露"
+      epic: epic-13
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "/metrics 端点暴露标准 Go runtime 指标"
+        - "业务指标：HTTP 请求数/延迟（按路由）、Webhook 处理数（成功/失败）、缓存命中率"
+        - "K8s ServiceMonitor manifest 已创建"
+
+    - id: "13.2"
+      title: "结构化审计日志"
+      epic: epic-13
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "认证、订阅变更、支付、钱包操作均输出 JSON 审计日志"
+        - "日志字段：timestamp、actor_id、action、resource_type、resource_id、result、ip"
+        - "日志级别与格式可通过环境变量配置"
+
+    - id: "deploy-k8s"
+      title: "K8s 部署 Manifests"
+      epic: ""
+      status: done
+      priority: P0
+      points: 2
+      owner: ""
+      acceptance_criteria:
+        - "Deployment（2 副本）、Service、Ingress manifests 完整"
+        - "ConfigMap + Secret 分离，所有敏感值走 Secret"
+        - "readOnlyRootFilesystem: true，runAsUser: 65534，非 root 运行"
+        - "Liveness/Readiness probe 配置，HPA 初始配置"
+        - "ArgoCD Application manifest 已加入 appset-services.yaml"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKLOG（Sprint 2 及后续）
+# ─────────────────────────────────────────────────────────────────────────────
+backlog:
+  - id: "12.3"
+    title: "自动续费"
+    epic: epic-12
+    priority: P1
+    points: 3
+    sprint: sprint-2
+    notes: "订阅到期前触发自动扣款，失败后重试策略（3次，指数退避）"
+
+  - id: "12.4"
+    title: "到期提醒邮件"
+    epic: epic-12
+    priority: P1
+    points: 2
+    sprint: sprint-2
+    notes: "到期前 7 天、3 天、1 天发送提醒；邮件模板可配置"
+
+  - id: "13.3"
+    title: "Jaeger 分布式追踪"
+    epic: epic-13
+    priority: P1
+    points: 3
+    sprint: sprint-2
+    notes: "OpenTelemetry SDK 接入，关键链路（支付/权益查询）添加 span"
+
+  - id: "14.1"
+    title: "发票生成"
+    epic: epic-14
+    priority: P1
+    points: 4
+    sprint: sprint-2
+    notes: "PDF 发票生成，支持中英文；发票信息关联订单存储"
+
+  - id: "14.2"
+    title: "退款工作流"
+    epic: epic-14
+    priority: P1
+    points: 3
+    sprint: sprint-2
+    notes: "退款申请、审核、执行流程；支持全额/部分退款；钱包余额同步"
+
+  - id: "14.3"
+    title: "GDPR 数据导出与删除"
+    epic: epic-14
+    priority: P2
+    points: 3
+    sprint: sprint-3
+    notes: "用户数据导出（JSON）；账号注销后匿名化处理"
+
+  - id: "15.1"
+    title: "gRPC 服务接口"
+    epic: epic-15
+    priority: P2
+    points: 5
+    sprint: sprint-3
+    notes: "核心查询接口迁移至 gRPC，HTTP 接口保留向后兼容"
+
+  - id: "15.2"
+    title: "企业账号（团队/组织）"
+    epic: epic-15
+    priority: P2
+    points: 5
+    sprint: sprint-3
+    notes: "组织创建/管理、成员邀请/移除、配额共享"
+
+  - id: "15.3"
+    title: "RBAC 权限控制"
+    epic: epic-15
+    priority: P2
+    points: 4
+    sprint: sprint-3
+    notes: "基于角色的资源访问控制，支持自定义角色"
+
+  - id: "16.1"
+    title: "批量发码工具"
+    epic: epic-16
+    priority: P1
+    points: 2
+    sprint: sprint-2
+    notes: "运营后台批量生成兑换码，支持 CSV 导出"
+
+  - id: "16.2"
+    title: "财务对账报表"
+    epic: epic-16
+    priority: P1
+    points: 3
+    sprint: sprint-2
+    notes: "按日/月汇总支付流水、退款、钱包变动；支持 CSV 导出"
+
+  - id: "16.3"
+    title: "运营数据看板"
+    epic: epic-16
+    priority: P2
+    points: 3
+    sprint: sprint-3
+    notes: "注册趋势、订阅转化率、MRR 等核心运营指标"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  epics_done: 10
+  epics_in_progress: 0
+  epics_planned: 6
+  epics_total: 16
+
+  # Story counts are estimates; finalize after Epic 1-10 story breakdown
+  stories_done: 43       # Epic 1-10 完成的 story 估计数
+  stories_in_sprint: 9   # Sprint 1 stories
+  stories_backlog: 12
+  stories_total: 64      # 估计总数
+
+  # Code quality
+  coverage_app: "77%"    # go test ./internal/app/...
+  coverage_target_app: "80%"
+  build_go: "passing"    # CGO_ENABLED=0 go build ./cmd/server
+  build_frontend: "passing"  # bun run build
+
+  # Deployment
+  deploy_status: "pending"      # pending | deployed | failed
+  migrations_status: "pending"  # pending | applied | failed
+  last_deployed: null
+  environment: null             # staging | production

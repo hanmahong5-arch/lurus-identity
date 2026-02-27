@@ -1,0 +1,17 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    uses: hanmahong5-arch/lurus/.github/workflows/reusable-go.yaml@main
+    with:
+      service_name: lurus-identity
+      go_version: "1.25"
+      run_tests: true
+      run_lint: true
+    secrets: inherit

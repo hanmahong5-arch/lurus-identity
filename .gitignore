@@ -1,0 +1,25 @@
+# Build output
+/app
+/lurus-identity
+
+# Test coverage
+*.out
+coverage.out
+cov.out
+
+# Frontend build
+web/dist/
+web/node_modules/
+
+# Go workspace
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

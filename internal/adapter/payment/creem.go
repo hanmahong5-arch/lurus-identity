@@ -26,15 +26,21 @@ type CreemProvider struct {
 
 // NewCreemProvider creates a CreemProvider.
 // Returns nil if API key is empty (feature disabled).
-func NewCreemProvider(apiKey, webhookSecret string) *CreemProvider {
+// Returns an error if API key is set but webhook secret is missing — a missing
+// secret would cause VerifyWebhook to accept any unsigned payload (fail-open),
+// which is equivalent to disabling payment authentication entirely.
+func NewCreemProvider(apiKey, webhookSecret string) (*CreemProvider, error) {
 	if apiKey == "" {
-		return nil
+		return nil, nil
+	}
+	if webhookSecret == "" {
+		return nil, fmt.Errorf("CREEM_WEBHOOK_SECRET is required when CREEM_API_KEY is set")
 	}
 	return &CreemProvider{
 		apiKey:        apiKey,
 		webhookSecret: webhookSecret,
 		httpClient:    &http.Client{Timeout: 15 * time.Second},
-	}
+	}, nil
 }
 
 // Name returns the provider identifier.
@@ -88,14 +94,19 @@ func (p *CreemProvider) CreateCheckout(ctx context.Context, o *entity.PaymentOrd
 
 // VerifyWebhook validates a Creem webhook via HMAC-SHA256 and extracts the order number.
 // sig is the raw value of the X-Creem-Signature header.
+// Fails closed: returns (_, false) if the secret is empty or signature mismatches.
 func (p *CreemProvider) VerifyWebhook(payload []byte, sig string) (orderNo string, ok bool) {
-	if p.webhookSecret != "" {
-		mac := hmac.New(sha256.New, []byte(p.webhookSecret))
-		mac.Write(payload)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(expected), []byte(sig)) {
-			return "", false
-		}
+	// Fail-closed: an empty secret rejects all requests rather than skipping
+	// verification. NewCreemProvider already prevents construction with an empty
+	// secret, but this guard provides defence-in-depth.
+	if p.webhookSecret == "" {
+		return "", false
+	}
+	mac := hmac.New(sha256.New, []byte(p.webhookSecret))
+	mac.Write(payload)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(sig)) {
+		return "", false
 	}
 
 	var event struct {

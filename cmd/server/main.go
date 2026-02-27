@@ -152,7 +152,10 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("init epay provider: %w", err)
 	}
 	stripeProvider := payment.NewStripeProvider(cfg.StripeSecretKey, cfg.StripeWebhookSecret)
-	creemProvider := payment.NewCreemProvider(cfg.CreemAPIKey, cfg.CreemWebhookSecret)
+	creemProvider, err := payment.NewCreemProvider(cfg.CreemAPIKey, cfg.CreemWebhookSecret)
+	if err != nil {
+		return fmt.Errorf("init creem provider: %w", err)
+	}
 
 	// --- Auth Middleware (Zitadel JWKS JWT) ---
 	jwtValidator := auth.NewValidator(auth.ValidatorConfig{

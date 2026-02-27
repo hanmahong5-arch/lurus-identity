@@ -1,10 +1,11 @@
 import React from 'react'
-import { Nav, Layout as SemiLayout } from '@douyinfe/semi-ui'
+import { Nav, Layout as SemiLayout, Button, Tooltip } from '@douyinfe/semi-ui'
 import {
   IconCoinMoney,
   IconCreditCard,
   IconStar,
   IconGift,
+  IconExit,
 } from '@douyinfe/semi-icons'
 import { useNavigate, useLocation, Outlet } from 'react-router-dom'
 import { useStore } from '../../store'
@@ -19,6 +20,11 @@ const NAV_ITEMS = [
   { itemKey: '/redeem',        text: '兑换码', icon: <IconGift /> },
 ]
 
+function handleLogout() {
+  localStorage.removeItem('token')
+  window.location.href = 'https://auth.lurus.cn/oidc/v1/end_session'
+}
+
 export default function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -26,7 +32,7 @@ export default function Layout() {
 
   return (
     <SemiLayout style={{ height: '100vh' }}>
-      <Sider style={{ background: '#fff', borderRight: '1px solid #f0f0f0' }}>
+      <Sider style={{ background: '#fff', borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '20px 16px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontWeight: 700, fontSize: 18, color: '#1677ff' }}>Lurus</span>
         </div>
@@ -34,8 +40,21 @@ export default function Layout() {
           selectedKeys={[location.pathname]}
           items={NAV_ITEMS}
           onSelect={({ itemKey }) => navigate(itemKey)}
-          style={{ borderRight: 'none' }}
+          style={{ borderRight: 'none', flex: 1 }}
         />
+        <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0' }}>
+          <Tooltip content="退出登录" position="right">
+            <Button
+              icon={<IconExit />}
+              type="tertiary"
+              theme="borderless"
+              onClick={handleLogout}
+              style={{ width: '100%', justifyContent: 'flex-start', color: '#8c8c8c' }}
+            >
+              退出登录
+            </Button>
+          </Tooltip>
+        </div>
       </Sider>
       <SemiLayout>
         <Header

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Typography, Button, Table, Tag } from '@douyinfe/semi-ui'
+import { Card, Typography, Button, Table, Tag, Select } from '@douyinfe/semi-ui'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../../store'
 import { listTransactions } from '../../api/wallet'
@@ -46,12 +46,17 @@ const columns = [
   },
 ]
 
+const TYPE_OPTIONS = Object.entries(TX_TYPE_MAP).map(([value, { label }]) => ({
+  label, value,
+}))
+
 export default function WalletPage() {
   const navigate = useNavigate()
   const { wallet, account, subscriptions, refreshWallet } = useStore()
   const [txList, setTxList] = useState([])
   const [txTotal, setTxTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [typeFilter, setTypeFilter] = useState(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -60,13 +65,20 @@ export default function WalletPage() {
 
   useEffect(() => {
     setLoading(true)
-    listTransactions({ page, page_size: 20 })
+    const params = { page, page_size: 20 }
+    if (typeFilter) params.type = typeFilter
+    listTransactions(params)
       .then((res) => {
         setTxList(res.data.data ?? [])
         setTxTotal(res.data.total ?? 0)
       })
       .finally(() => setLoading(false))
-  }, [page])
+  }, [page, typeFilter])
+
+  function handleFilterChange(val) {
+    setTypeFilter(val ?? null)
+    setPage(1)
+  }
 
   return (
     <div>
@@ -94,12 +106,31 @@ export default function WalletPage() {
         </Card>
       </div>
 
-      <Card title="交易流水">
+      <Card
+        title="交易流水"
+        headerExtraContent={
+          <Select
+            placeholder="筛选类型"
+            optionList={TYPE_OPTIONS}
+            value={typeFilter}
+            onChange={handleFilterChange}
+            showClear
+            style={{ width: 140 }}
+            size="small"
+          />
+        }
+      >
         <Table
           columns={columns}
           dataSource={txList}
           loading={loading}
           rowKey="id"
+          empty={
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#8c8c8c' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+              <div>{typeFilter ? `暂无「${TX_TYPE_MAP[typeFilter]?.label ?? typeFilter}」类型的交易记录` : '暂无交易记录'}</div>
+            </div>
+          }
           pagination={{
             total: txTotal,
             currentPage: page,

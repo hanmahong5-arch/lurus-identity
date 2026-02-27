@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Card, Typography, Button, Modal, Toast, Tag, Descriptions
+  Card, Typography, Button, Modal, Toast, Tag, Descriptions, Banner
 } from '@douyinfe/semi-ui'
 import { useStore } from '../../store'
-import { listProducts, listPlans, checkout } from '../../api/subscription'
+import { listProducts, listPlans, checkout, cancelSubscription } from '../../api/subscription'
 import { getTopupInfo } from '../../api/wallet'
 import LurusBadge from '../../components/LurusBadge'
 
@@ -16,15 +16,26 @@ const PLAN_CODE_LABEL = {
   enterprise: 'Enterprise',
 }
 
+const STATUS_TAG = {
+  active:  { label: '有效', color: 'green' },
+  expired: { label: '已到期', color: 'red' },
+  grace:   { label: '宽限期', color: 'orange' },
+  trial:   { label: '试用', color: 'cyan' },
+  free:    { label: '免费', color: 'grey' },
+}
+
 function formatDate(d) {
   if (!d) return '永久'
   return new Date(d).toLocaleDateString('zh-CN')
 }
 
-function SubCard({ product, sub, onUpgrade }) {
+function SubCard({ product, sub, onUpgrade, onCancel }) {
   const planCode = sub?.plan_code ?? 'free'
+  const status = sub?.status ?? 'free'
   const expiresAt = sub?.expires_at
   const autoRenew = sub?.auto_renew
+  const statusInfo = STATUS_TAG[status] ?? { label: status, color: 'grey' }
+  const canCancel = sub && planCode !== 'free' && status === 'active'
 
   return (
     <Card
@@ -34,12 +45,20 @@ function SubCard({ product, sub, onUpgrade }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <LurusBadge productId={product.id} planCode={planCode} />
           <span>{product.name}</span>
+          <Tag color={statusInfo.color} size="small">{statusInfo.label}</Tag>
         </div>
       }
       footer={
-        <Button type="primary" size="small" onClick={() => onUpgrade(product)}>
-          {planCode === 'free' ? '立即订阅' : '升级套餐'}
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button type="primary" size="small" onClick={() => onUpgrade(product)}>
+            {planCode === 'free' ? '立即订阅' : '升级套餐'}
+          </Button>
+          {canCancel && (
+            <Button type="danger" size="small" theme="borderless" onClick={() => onCancel(product, sub)}>
+              取消订阅
+            </Button>
+          )}
+        </div>
       }
     >
       <Descriptions
@@ -47,7 +66,7 @@ function SubCard({ product, sub, onUpgrade }) {
         data={[
           { key: '当前套餐', value: PLAN_CODE_LABEL[planCode] ?? planCode },
           { key: '到期日期', value: formatDate(expiresAt) },
-          { key: '自动续费', value: autoRenew ? '开启' : '关闭' },
+          { key: '自动续费', value: autoRenew ? '开启' : '未开启' },
         ]}
       />
     </Card>
@@ -63,6 +82,8 @@ export default function SubscriptionsPage() {
   const [methods, setMethods] = useState([])
   const [method, setMethod] = useState('wallet')
   const [loading, setLoading] = useState(false)
+  const [cancelTarget, setCancelTarget] = useState(null) // { product, sub }
+  const [cancelLoading, setCancelLoading] = useState(false)
 
   useEffect(() => {
     listProducts().then((res) => setProducts(res.data ?? []))
@@ -100,6 +121,27 @@ export default function SubscriptionsPage() {
     }
   }
 
+  async function handleCancel() {
+    if (!cancelTarget) return
+    setCancelLoading(true)
+    try {
+      await cancelSubscription(cancelTarget.product.id)
+      Toast.success('订阅已取消，到期前仍可正常使用')
+      setCancelTarget(null)
+      await refreshSubscriptions()
+    } catch (err) {
+      Toast.error(err.response?.data?.error ?? '取消失败')
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
+  // Wallet balance warning for selected plan when using wallet payment
+  const walletInsufficient =
+    method === 'wallet' &&
+    selectedPlan &&
+    (wallet?.balance ?? 0) < selectedPlan.price_cny
+
   const subMap = Object.fromEntries(subscriptions.map((s) => [s.product_id, s]))
 
   return (
@@ -113,16 +155,19 @@ export default function SubscriptionsPage() {
             product={p}
             sub={subMap[p.id]}
             onUpgrade={openUpgrade}
+            onCancel={(product, sub) => setCancelTarget({ product, sub })}
           />
         ))}
       </div>
 
+      {/* Checkout modal */}
       <Modal
         title={`订阅 ${upgradeProduct?.name}`}
         visible={!!upgradeProduct}
         onOk={handleCheckout}
         onCancel={() => setUpgradeProduct(null)}
         okText="确认购买"
+        okButtonProps={{ disabled: walletInsufficient }}
         confirmLoading={loading}
         width={480}
       >
@@ -150,7 +195,7 @@ export default function SubscriptionsPage() {
           </div>
         </div>
 
-        <div>
+        <div style={{ marginBottom: 12 }}>
           <Text type="secondary">支付方式</Text>
           <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
             <Button
@@ -170,6 +215,31 @@ export default function SubscriptionsPage() {
             ))}
           </div>
         </div>
+
+        {walletInsufficient && (
+          <Banner
+            type="warning"
+            description={`钱包余额不足（¥${wallet?.balance?.toFixed(2) ?? '0.00'}），需 ¥${selectedPlan.price_cny}。请先充值或选择其他支付方式。`}
+            closeIcon={null}
+          />
+        )}
+      </Modal>
+
+      {/* Cancel confirmation modal */}
+      <Modal
+        title="取消订阅"
+        visible={!!cancelTarget}
+        onOk={handleCancel}
+        onCancel={() => setCancelTarget(null)}
+        okText="确认取消"
+        okButtonProps={{ type: 'danger' }}
+        confirmLoading={cancelLoading}
+        width={400}
+      >
+        <p>确认取消 <strong>{cancelTarget?.product.name}</strong> 的订阅？</p>
+        <p style={{ color: '#8c8c8c', fontSize: 13 }}>
+          取消后当前订阅周期结束前仍可正常使用，到期后不再续费。
+        </p>
       </Modal>
     </div>
   )

@@ -34,16 +34,27 @@ export default function TopupPage() {
   const orderNo = searchParams.get('order_no')
   const [pollResult, setPollResult] = useState(null)
   const [polling, setPolling] = useState(false)
+  const [countdown, setCountdown] = useState(300) // 5 minutes in seconds
 
   useEffect(() => {
     if (!orderNo) return
     setPolling(true)
+    setCountdown(300)
     const start = Date.now()
     const MAX_MS = 5 * 60 * 1000
 
-    const timer = setInterval(async () => {
+    // Countdown ticker
+    const countdownTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - start) / 1000)
+      const remaining = Math.max(0, 300 - elapsed)
+      setCountdown(remaining)
+    }, 1000)
+
+    // Order polling
+    const pollTimer = setInterval(async () => {
       if (Date.now() - start > MAX_MS) {
-        clearInterval(timer)
+        clearInterval(pollTimer)
+        clearInterval(countdownTimer)
         setPolling(false)
         setPollResult('timeout')
         return
@@ -51,19 +62,24 @@ export default function TopupPage() {
       try {
         const res = await getOrder(orderNo)
         if (res.data.status === 'paid') {
-          clearInterval(timer)
+          clearInterval(pollTimer)
+          clearInterval(countdownTimer)
           setPolling(false)
           setPollResult('success')
           refreshWallet()
         } else if (res.data.status === 'failed' || res.data.status === 'cancelled') {
-          clearInterval(timer)
+          clearInterval(pollTimer)
+          clearInterval(countdownTimer)
           setPolling(false)
           setPollResult('failed')
         }
       } catch (_) {}
     }, 3000)
 
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(pollTimer)
+      clearInterval(countdownTimer)
+    }
   }, [orderNo])
 
   const actualAmount = customAmount ? parseFloat(customAmount) : amount
@@ -88,10 +104,21 @@ export default function TopupPage() {
   }
 
   if (polling) {
+    const mins = Math.floor(countdown / 60)
+    const secs = countdown % 60
     return (
       <div style={{ textAlign: 'center', marginTop: 80 }}>
         <Spin size="large" />
-        <div style={{ marginTop: 16 }}>正在等待支付结果...</div>
+        <div style={{ marginTop: 16, fontSize: 16 }}>正在等待支付结果...</div>
+        <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 14 }}>
+          订单号：{orderNo}
+        </div>
+        <div style={{ marginTop: 8, color: countdown <= 30 ? '#f5222d' : '#8c8c8c', fontSize: 13 }}>
+          {mins}:{String(secs).padStart(2, '0')} 后超时
+        </div>
+        <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 12 }}>
+          已在新标签页打开支付页面，请完成支付后回到此页面
+        </div>
       </div>
     )
   }
@@ -108,11 +135,28 @@ export default function TopupPage() {
     )
   }
 
+  if (pollResult === 'timeout') {
+    return (
+      <div style={{ textAlign: 'center', marginTop: 80 }}>
+        <div style={{ fontSize: 48 }}>⏳</div>
+        <Title heading={4} style={{ marginTop: 16 }}>等待超时</Title>
+        <div style={{ color: '#8c8c8c', marginTop: 8 }}>
+          如果你已完成支付，余额将在几分钟内到账。<br />可以前往钱包查看，或重新发起充值。
+        </div>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 }}>
+          <Button type="primary" onClick={() => navigate('/wallet')}>查看钱包</Button>
+          <Button onClick={() => navigate('/topup')}>重新充值</Button>
+        </div>
+      </div>
+    )
+  }
+
   if (pollResult === 'failed') {
     return (
       <div style={{ textAlign: 'center', marginTop: 80 }}>
         <div style={{ fontSize: 48 }}>❌</div>
         <Title heading={4} style={{ marginTop: 16 }}>支付未完成</Title>
+        <div style={{ color: '#8c8c8c', marginTop: 8 }}>订单已取消或支付失败</div>
         <Button onClick={() => navigate('/topup')} style={{ marginTop: 16 }}>重新充值</Button>
       </div>
     )

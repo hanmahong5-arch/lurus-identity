@@ -24,6 +24,5 @@ web/node_modules/
 .DS_Store
 Thumbs.db
 
-# Secrets managed out-of-band (kubectl / Sealed Secrets)
-# Do NOT commit real credentials. Use kubectl apply to set real values.
-deploy/k8s/secrets.yaml
+# Never commit real credentials here.
+# secrets.yaml contains only empty placeholders; real values set via kubectl.

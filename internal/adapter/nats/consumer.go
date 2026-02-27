@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/hanmahong5-arch/lurus-identity/internal/app"
@@ -28,6 +29,8 @@ func NewConsumer(nc *natsgo.Conn, vip *app.VIPService) (*Consumer, error) {
 }
 
 // Run starts consuming messages until ctx is cancelled.
+// If the upstream LLM_EVENTS stream does not yet exist (lurus-api not deployed),
+// the consumer logs a warning and exits cleanly — the service continues running.
 func (c *Consumer) Run(ctx context.Context) error {
 	sub, err := c.js.QueueSubscribe(
 		event.SubjectLLMUsageReported,
@@ -45,6 +48,14 @@ func (c *Consumer) Run(ctx context.Context) error {
 		natsgo.MaxDeliver(5),
 	)
 	if err != nil {
+		// Graceful degradation: if the upstream stream does not exist yet,
+		// warn and skip rather than crashing the service.
+		if strings.Contains(err.Error(), "no stream matches subject") {
+			slog.Warn("nats consumer: upstream LLM_EVENTS stream not found; VIP LLM accumulation disabled until lurus-api is deployed",
+				"subject", event.SubjectLLMUsageReported)
+			<-ctx.Done()
+			return nil
+		}
 		return fmt.Errorf("subscribe %s: %w", event.SubjectLLMUsageReported, err)
 	}
 	defer sub.Unsubscribe()

@@ -1,19 +1,22 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
-  Card, Typography, Table, Input, Button, Modal, InputNumber, Toast, Tag
+  Card, Typography, Table, Input, Button, Modal, InputNumber,
+  Toast, Tag, Tabs, TabPane, Form, Toast as SemiToast,
 } from '@douyinfe/semi-ui'
 import axios from 'axios'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 const adminClient = axios.create({ baseURL: '/admin/v1', timeout: 15000 })
 adminClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('lurus_token') || localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
-export default function AdminPage() {
+// ── Account List Tab ───────────────────────────────────────────────────────────
+
+function AccountListTab() {
   const [accounts, setAccounts] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -30,7 +33,7 @@ export default function AdminPage() {
       const res = await adminClient.get('/accounts', { params: { page: p, page_size: 20, keyword: kw } })
       setAccounts(res.data.accounts ?? res.data.data ?? [])
       setTotal(res.data.total ?? 0)
-    } catch (err) {
+    } catch {
       Toast.error('加载失败')
     } finally {
       setLoading(false)
@@ -79,8 +82,6 @@ export default function AdminPage() {
 
   return (
     <div>
-      <Title heading={3} style={{ marginBottom: 24 }}>管理后台 — 账号列表</Title>
-
       <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
         <Input
           value={keyword}
@@ -133,6 +134,251 @@ export default function AdminPage() {
           />
         </div>
       </Modal>
+    </div>
+  )
+}
+
+// ── System Config Tab ──────────────────────────────────────────────────────────
+
+const SECRET_KEYS = new Set([
+  'epay_key', 'stripe_secret_key', 'stripe_webhook_secret',
+  'creem_api_key', 'creem_webhook_secret',
+])
+
+const QR_KEYS = new Set(['qr_static_alipay', 'qr_static_wechat', 'qr_channel_promo'])
+
+const QR_LABELS = {
+  qr_static_alipay: '支付宝静态收款码',
+  qr_static_wechat: '微信静态收款码',
+  qr_channel_promo: '渠道推广码',
+}
+
+const QR_TYPES = {
+  qr_static_alipay: 'alipay',
+  qr_static_wechat: 'wechat',
+  qr_channel_promo: 'channel',
+}
+
+const PROVIDER_SECTIONS = [
+  {
+    label: 'Epay 易支付',
+    keys: ['epay_partner_id', 'epay_key', 'epay_gateway_url', 'epay_notify_url'],
+    labels: {
+      epay_partner_id:  '商户 ID',
+      epay_key:         '签名密钥',
+      epay_gateway_url: '网关 URL',
+      epay_notify_url:  '回调 URL',
+    },
+  },
+  {
+    label: 'Stripe',
+    keys: ['stripe_secret_key', 'stripe_webhook_secret'],
+    labels: {
+      stripe_secret_key:     'Secret Key',
+      stripe_webhook_secret: 'Webhook 密钥',
+    },
+  },
+  {
+    label: 'Creem',
+    keys: ['creem_api_key', 'creem_webhook_secret'],
+    labels: {
+      creem_api_key:         'API Key',
+      creem_webhook_secret:  'Webhook 密钥',
+    },
+  },
+]
+
+function SystemConfigTab() {
+  const [settings, setSettings] = useState({})  // key → { value, is_secret }
+  const [edits, setEdits] = useState({})         // key → new value (string)
+  const [revealed, setRevealed] = useState({})   // key → bool
+  const [saving, setSaving] = useState(false)
+  const [qrPreviews, setQrPreviews] = useState({}) // key → data URL
+  const [qrUploading, setQrUploading] = useState({})
+  const fileRefs = { qr_static_alipay: useRef(), qr_static_wechat: useRef(), qr_channel_promo: useRef() }
+
+  async function fetchSettings() {
+    try {
+      const res = await adminClient.get('/settings')
+      const map = {}
+      for (const s of res.data.settings ?? []) {
+        map[s.key] = s
+      }
+      setSettings(map)
+    } catch {
+      Toast.error('加载配置失败')
+    }
+  }
+
+  useEffect(() => { fetchSettings() }, [])
+
+  function getValue(key) {
+    if (edits[key] !== undefined) return edits[key]
+    const s = settings[key]
+    if (!s) return ''
+    // Secret placeholder from server → show empty to allow editing
+    if (s.is_secret && s.value === '••••••••') return ''
+    return s.value ?? ''
+  }
+
+  async function handleSave() {
+    const paymentKeys = PROVIDER_SECTIONS.flatMap(s => s.keys)
+    const items = paymentKeys
+      .filter(k => edits[k] !== undefined && edits[k] !== '')
+      .map(k => ({ key: k, value: edits[k] }))
+
+    if (items.length === 0) {
+      Toast.info('没有需要保存的更改')
+      return
+    }
+    setSaving(true)
+    try {
+      await adminClient.put('/settings', { settings: items })
+      Toast.success(`已保存 ${items.length} 项配置`)
+      setEdits({})
+      fetchSettings()
+    } catch (err) {
+      Toast.error(err.response?.data?.error ?? '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleQRUpload(key, file) {
+    setQrUploading(prev => ({ ...prev, [key]: true }))
+    try {
+      const base64 = await fileToBase64(file)
+      const qrType = QR_TYPES[key]
+      await adminClient.post('/settings/qrcode', { type: qrType, image_base64: base64 })
+      setQrPreviews(prev => ({ ...prev, [key]: `data:image/png;base64,${base64}` }))
+      Toast.success(`${QR_LABELS[key]} 上传成功`)
+    } catch (err) {
+      Toast.error(err.response?.data?.error ?? '上传失败')
+    } finally {
+      setQrUploading(prev => ({ ...prev, [key]: false }))
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      {PROVIDER_SECTIONS.map((section) => (
+        <Card
+          key={section.label}
+          title={section.label}
+          style={{ marginBottom: 16 }}
+        >
+          {section.keys.map((key) => {
+            const isSecret = SECRET_KEYS.has(key)
+            const isRevealed = revealed[key]
+            const inputType = isSecret && !isRevealed ? 'password' : 'text'
+            return (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+                <Text style={{ width: 160, flexShrink: 0, color: '#595959' }}>
+                  {section.labels[key]}
+                </Text>
+                <Input
+                  type={inputType}
+                  value={getValue(key)}
+                  onChange={(v) => setEdits(prev => ({ ...prev, [key]: v }))}
+                  placeholder={isSecret ? '输入后保存生效（留空=保持不变）' : ''}
+                  style={{ flex: 1 }}
+                />
+                {isSecret && (
+                  <Button
+                    size="small"
+                    type="tertiary"
+                    onClick={() => setRevealed(prev => ({ ...prev, [key]: !prev[key] }))}
+                  >
+                    {isRevealed ? '隐藏' : '显示'}
+                  </Button>
+                )}
+              </div>
+            )
+          })}
+        </Card>
+      ))}
+
+      <Button type="primary" loading={saving} onClick={handleSave} style={{ marginBottom: 24 }}>
+        保存支付配置
+      </Button>
+
+      <Card title="二维码管理" style={{ marginBottom: 16 }}>
+        {Object.entries(QR_LABELS).map(([key, label]) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 12 }}>
+            <Text style={{ width: 160, flexShrink: 0, color: '#595959' }}>{label}</Text>
+            <input
+              ref={fileRefs[key]}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) handleQRUpload(key, file)
+                e.target.value = ''
+              }}
+            />
+            <Button
+              loading={!!qrUploading[key]}
+              onClick={() => fileRefs[key].current?.click()}
+              size="small"
+            >
+              选择图片
+            </Button>
+            {qrPreviews[key] && (
+              <img
+                src={qrPreviews[key]}
+                alt={label}
+                style={{ width: 80, height: 80, objectFit: 'contain', border: '1px solid #e8e8e8', borderRadius: 4 }}
+              />
+            )}
+            {!qrPreviews[key] && settings[key]?.value && (
+              <img
+                src={`/api/v1/public/qrcode/${QR_TYPES[key]}`}
+                alt={label}
+                style={{ width: 80, height: 80, objectFit: 'contain', border: '1px solid #e8e8e8', borderRadius: 4 }}
+                onError={(e) => { e.target.style.display = 'none' }}
+              />
+            )}
+          </div>
+        ))}
+      </Card>
+    </div>
+  )
+}
+
+// Read a File as raw base64 (without data-URL prefix).
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataUrl = e.target.result
+      // Strip the "data:<mime>;base64," prefix.
+      const base64 = dataUrl.split(',')[1]
+      resolve(base64)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+// ── Page root ─────────────────────────────────────────────────────────────────
+
+export default function AdminPage() {
+  return (
+    <div>
+      <Title heading={3} style={{ marginBottom: 24 }}>管理后台</Title>
+      <Tabs type="line">
+        <TabPane tab="账号列表" itemKey="accounts">
+          <div style={{ paddingTop: 16 }}>
+            <AccountListTab />
+          </div>
+        </TabPane>
+        <TabPane tab="系统配置" itemKey="settings">
+          <div style={{ paddingTop: 16 }}>
+            <SystemConfigTab />
+          </div>
+        </TabPane>
+      </Tabs>
     </div>
   )
 }

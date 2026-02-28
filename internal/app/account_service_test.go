@@ -181,3 +181,81 @@ func TestAccountService_BindOAuth(t *testing.T) {
 		t.Fatalf("BindOAuth error: %v", err)
 	}
 }
+
+// ── UpsertByWechat tests ───────────────────────────────────────────────────────
+
+func TestAccountService_UpsertByWechat_CreatesNew(t *testing.T) {
+	svc := makeAccountService()
+	ctx := context.Background()
+
+	a, err := svc.UpsertByWechat(ctx, "wx123")
+	if err != nil {
+		t.Fatalf("UpsertByWechat error: %v", err)
+	}
+	if a == nil {
+		t.Fatal("expected non-nil account")
+	}
+	if a.Email != "wechat.wx123@noreply.lurus.cn" {
+		t.Errorf("Email = %q, want wechat.wx123@noreply.lurus.cn", a.Email)
+	}
+	if a.ZitadelSub != "wechat:wx123" {
+		t.Errorf("ZitadelSub = %q, want wechat:wx123", a.ZitadelSub)
+	}
+	if a.ID <= 0 {
+		t.Errorf("ID = %d, want > 0", a.ID)
+	}
+}
+
+func TestAccountService_UpsertByWechat_ReturnsExisting(t *testing.T) {
+	store := newMockAccountStore()
+	svc := NewAccountService(store, newMockWalletStore(), newMockVIPStore(nil))
+	ctx := context.Background()
+
+	// First call creates the account and its OAuthBinding
+	a1, err := svc.UpsertByWechat(ctx, "wx999")
+	if err != nil {
+		t.Fatalf("first UpsertByWechat error: %v", err)
+	}
+
+	// Second call should return the same account via the stored OAuthBinding
+	a2, err := svc.UpsertByWechat(ctx, "wx999")
+	if err != nil {
+		t.Fatalf("second UpsertByWechat error: %v", err)
+	}
+	if a2 == nil {
+		t.Fatal("expected non-nil account on second call")
+	}
+	if a2.ID != a1.ID {
+		t.Errorf("second call returned different account ID %d, want %d", a2.ID, a1.ID)
+	}
+}
+
+func TestAccountService_UpsertByWechat_EmptyID_Error(t *testing.T) {
+	svc := makeAccountService()
+	_, err := svc.UpsertByWechat(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty wechatID, got nil")
+	}
+}
+
+func TestAccountService_GetByOAuthBinding_Delegates(t *testing.T) {
+	svc := makeAccountService()
+	ctx := context.Background()
+
+	// Create account via UpsertByWechat — this also creates the OAuthBinding
+	a, err := svc.UpsertByWechat(ctx, "wx-lookup-test")
+	if err != nil {
+		t.Fatalf("UpsertByWechat error: %v", err)
+	}
+
+	got, err := svc.GetByOAuthBinding(ctx, "wechat", "wx-lookup-test")
+	if err != nil {
+		t.Fatalf("GetByOAuthBinding error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil account from GetByOAuthBinding")
+	}
+	if got.ID != a.ID {
+		t.Errorf("got account ID %d, want %d", got.ID, a.ID)
+	}
+}

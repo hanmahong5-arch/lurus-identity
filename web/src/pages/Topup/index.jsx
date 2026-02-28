@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Card, Typography, Button, InputNumber, Modal, Toast, Spin, Tag
+  Card, Typography, Button, InputNumber, Modal, Toast, Spin, Divider
 } from '@douyinfe/semi-ui'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getTopupInfo, createTopup, getOrder } from '../../api/wallet'
@@ -9,6 +9,55 @@ import { useStore } from '../../store'
 const { Title, Text } = Typography
 
 const QUICK_AMOUNTS = [10, 30, 100, 300, 500]
+
+// StaticQRSection shows admin-uploaded static QR codes for manual transfers.
+function StaticQRSection() {
+  const [alipayOk, setAlipayOk] = useState(false)
+  const [wechatOk, setWechatOk] = useState(false)
+
+  // We probe the endpoints; if they return 204 (empty), we hide the section.
+  useEffect(() => {
+    fetch('/api/v1/public/qrcode/alipay')
+      .then(r => { if (r.ok && r.status === 200) setAlipayOk(true) })
+      .catch(() => {})
+    fetch('/api/v1/public/qrcode/wechat')
+      .then(r => { if (r.ok && r.status === 200) setWechatOk(true) })
+      .catch(() => {})
+  }, [])
+
+  if (!alipayOk && !wechatOk) return null
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <Divider>扫码收款（小额）</Divider>
+      <div style={{ display: 'flex', gap: 32, justifyContent: 'center', padding: '8px 0' }}>
+        {alipayOk && (
+          <div style={{ textAlign: 'center' }}>
+            <img
+              src="/api/v1/public/qrcode/alipay"
+              alt="支付宝收款码"
+              style={{ width: 140, height: 140, objectFit: 'contain' }}
+            />
+            <div style={{ marginTop: 6, fontSize: 13, color: '#595959' }}>支付宝</div>
+          </div>
+        )}
+        {wechatOk && (
+          <div style={{ textAlign: 'center' }}>
+            <img
+              src="/api/v1/public/qrcode/wechat"
+              alt="微信收款码"
+              style={{ width: 140, height: 140, objectFit: 'contain' }}
+            />
+            <div style={{ marginTop: 6, fontSize: 13, color: '#595959' }}>微信</div>
+          </div>
+        )}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 12, color: '#8c8c8c', marginTop: 8 }}>
+        转账后请截图发给客服，客服确认后手动入账
+      </div>
+    </Card>
+  )
+}
 
 export default function TopupPage() {
   const navigate = useNavigate()
@@ -213,6 +262,8 @@ export default function TopupPage() {
           确认充值 ¥{actualAmount}
         </Button>
       </div>
+
+      <StaticQRSection />
 
       <Modal
         title="确认充值"

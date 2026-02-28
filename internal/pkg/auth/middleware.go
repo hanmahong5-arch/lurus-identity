@@ -11,28 +11,39 @@ import (
 const (
 	// ContextKeyAccountID is the gin context key for the resolved account ID.
 	ContextKeyAccountID = "account_id"
-	// ContextKeyClaims is the gin context key for the parsed JWT claims.
+	// ContextKeyClaims is the gin context key for the parsed Zitadel JWT claims.
 	ContextKeyClaims = "jwt_claims"
 )
 
-// AccountLookup resolves a Zitadel subject (sub) to a lurus-identity account ID.
-// The implementation typically checks Redis first, then falls back to the DB.
-type AccountLookup func(ctx context.Context, zitadelSub string) (int64, error)
+// AccountLookup resolves a Zitadel JWT claims to a lurus-identity account ID.
+// On first login (DB miss), implementations should auto-create the account via
+// the claims fields (sub, email, name) rather than returning an error.
+type AccountLookup func(ctx context.Context, claims *Claims) (int64, error)
 
 // JWTMiddleware is a Gin middleware factory for JWT validation.
+// It supports two token types:
+//   - lurus session token (HS256, issued by this service for WeChat logins)
+//   - Zitadel JWT (RS256/ES256, issued by Zitadel OIDC server)
 type JWTMiddleware struct {
-	validator *Validator
-	lookup    AccountLookup
+	validator     *Validator
+	lookup        AccountLookup
+	sessionSecret string // for lurus-issued HS256 session tokens; empty = disabled
 }
 
-// NewJWTMiddleware creates the middleware. lookup is called after signature
-// validation to resolve the Zitadel sub to the internal account ID.
-func NewJWTMiddleware(v *Validator, lookup AccountLookup) *JWTMiddleware {
-	return &JWTMiddleware{validator: v, lookup: lookup}
+// NewJWTMiddleware creates the middleware. sessionSecret enables lurus session token
+// validation in addition to Zitadel JWT. Pass "" to disable session tokens.
+func NewJWTMiddleware(v *Validator, lookup AccountLookup, sessionSecret string) *JWTMiddleware {
+	return &JWTMiddleware{validator: v, lookup: lookup, sessionSecret: sessionSecret}
 }
 
 // Auth returns a Gin HandlerFunc that validates the Bearer JWT and sets
-// account_id + jwt_claims in the context. Aborts with 401 on any failure.
+// account_id (and optionally jwt_claims) in the context.
+//
+// Validation order:
+//  1. Lurus session token (HS256, cheap local check — no network)
+//  2. Zitadel JWT (RS256/ES256, requires JWKS fetch on first use)
+//
+// Aborts with 401 on any failure.
 func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, err := extractBearerToken(c)
@@ -41,15 +52,25 @@ func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 			return
 		}
 
+		// Fast path: try lurus session token (no network, pure HMAC).
+		if m.sessionSecret != "" {
+			if accountID, err := ValidateSessionToken(token, m.sessionSecret); err == nil {
+				c.Set(ContextKeyAccountID, accountID)
+				c.Next()
+				return
+			}
+		}
+
+		// Slow path: Zitadel JWT validation (may fetch JWKS on cache miss).
 		claims, err := m.validator.Validate(c.Request.Context(), token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
 
-		accountID, err := m.lookup(c.Request.Context(), claims.Sub)
+		accountID, err := m.lookup(c.Request.Context(), claims)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account not found"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account lookup failed"})
 			return
 		}
 
@@ -60,7 +81,9 @@ func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 }
 
 // AdminAuth returns a Gin HandlerFunc that validates the JWT AND requires an
-// admin role. Returns 401 for missing/invalid tokens, 403 for missing role.
+// admin role. Lurus session tokens are not accepted here — admin access requires
+// a Zitadel JWT with the configured admin role.
+// Returns 401 for missing/invalid tokens, 403 for missing role.
 func (m *JWTMiddleware) AdminAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, err := extractBearerToken(c)
@@ -80,9 +103,9 @@ func (m *JWTMiddleware) AdminAuth() gin.HandlerFunc {
 			return
 		}
 
-		accountID, err := m.lookup(c.Request.Context(), claims.Sub)
+		accountID, err := m.lookup(c.Request.Context(), claims)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account not found"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account lookup failed"})
 			return
 		}
 
@@ -122,6 +145,7 @@ func GetAccountID(c *gin.Context) int64 {
 }
 
 // GetClaims retrieves the JWT claims set by Auth middleware.
+// Returns nil for lurus session token authenticated requests.
 func GetClaims(c *gin.Context) *Claims {
 	v, _ := c.Get(ContextKeyClaims)
 	claims, _ := v.(*Claims)

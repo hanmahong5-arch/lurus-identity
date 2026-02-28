@@ -61,6 +61,13 @@ type Config struct {
 	EmailSMTPPass string // EMAIL_SMTP_PASS
 	EmailFrom     string // EMAIL_FROM
 
+	// WeChat OAuth proxy (used by WeChat direct login)
+	WechatServerAddress string // WECHAT_SERVER_ADDRESS (base URL of wechat proxy)
+	WechatServerToken   string // WECHAT_SERVER_TOKEN (bearer token for proxy)
+
+	// Session token (lurus-issued HS256 JWT for WeChat login)
+	SessionSecret string // SESSION_SECRET (min 32 bytes recommended)
+
 	// Timeouts
 	ShutdownTimeout     time.Duration
 	CacheEntitlementTTL time.Duration
@@ -100,6 +107,9 @@ func Load() (*Config, error) {
 		CreemAPIKey:         getEnv("CREEM_API_KEY", ""),
 		CreemWebhookSecret:  getEnv("CREEM_WEBHOOK_SECRET", ""),
 		CreemReturnURL:      getEnv("CREEM_RETURN_URL", ""),
+		WechatServerAddress: getEnv("WECHAT_SERVER_ADDRESS", ""),
+		WechatServerToken:   getEnv("WECHAT_SERVER_TOKEN", ""),
+		SessionSecret:       getEnv("SESSION_SECRET", ""),
 		EmailSMTPHost:       getEnv("EMAIL_SMTP_HOST", ""),
 		EmailSMTPPort:       parseInt("EMAIL_SMTP_PORT", 587),
 		EmailSMTPUser:       getEnv("EMAIL_SMTP_USER", ""),

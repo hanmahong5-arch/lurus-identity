@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Typography, Button, Table, Tag, Select } from '@douyinfe/semi-ui'
+import { Card, Typography, Button, Table, Tag, Select, Toast } from '@douyinfe/semi-ui'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../../store'
 import { listTransactions } from '../../api/wallet'
@@ -50,6 +50,60 @@ const TYPE_OPTIONS = Object.entries(TX_TYPE_MAP).map(([value, { label }]) => ({
   label, value,
 }))
 
+// UserCard shows the LurusID and linked login methods at the top of the wallet page.
+function UserCard({ account }) {
+  if (!account) return null
+
+  const lurusID = account.lurus_id || ''
+
+  function copyLurusID() {
+    if (!lurusID) return
+    navigator.clipboard.writeText(lurusID)
+      .then(() => Toast.success('Lurus 号已复制'))
+      .catch(() => Toast.error('复制失败，请手动复制'))
+  }
+
+  // Detect linked methods from email/zitadel_sub fields.
+  const hasEmail = account.email && !account.email.startsWith('wechat.')
+  const hasWechat = account.email?.startsWith('wechat.') ||
+    (account.zitadel_sub && account.zitadel_sub.startsWith('wechat:'))
+
+  return (
+    <Card shadows="always" style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div
+          style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: '#1677ff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontSize: 20, fontWeight: 700, flexShrink: 0,
+          }}
+        >
+          {(account.display_name || account.nickname || 'U')[0].toUpperCase()}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>
+            {account.display_name || account.nickname || '用户'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              Lurus 号：<span style={{ fontFamily: 'monospace', color: '#1677ff' }}>{lurusID}</span>
+            </Text>
+            {lurusID && (
+              <Button size="small" type="tertiary" onClick={copyLurusID}>
+                复制
+              </Button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            {hasEmail && <Tag color="blue" size="small">邮箱 ✓</Tag>}
+            {hasWechat && <Tag color="green" size="small">微信 ✓</Tag>}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 export default function WalletPage() {
   const navigate = useNavigate()
   const { wallet, account, subscriptions, refreshWallet } = useStore()
@@ -83,6 +137,7 @@ export default function WalletPage() {
   return (
     <div>
       <Title heading={3} style={{ marginBottom: 24 }}>我的钱包</Title>
+      <UserCard account={account} />
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <Card style={{ flex: 1 }} shadows="always">

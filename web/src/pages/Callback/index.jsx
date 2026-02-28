@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Spin, Typography } from '@douyinfe/semi-ui'
-import { handleCallback } from '../../auth'
+import { handleCallback, storeLurusToken } from '../../auth'
 
 const { Text } = Typography
 
@@ -11,8 +11,20 @@ export default function CallbackPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const code   = params.get('code')
-    const err    = params.get('error')
+
+    // WeChat login path: server redirected here with a lurus session token.
+    const lurusToken = params.get('lurus_token')
+    if (lurusToken) {
+      storeLurusToken(lurusToken)
+      const returnTo = sessionStorage.getItem('login_return') || '/wallet'
+      sessionStorage.removeItem('login_return')
+      navigate(returnTo, { replace: true })
+      return
+    }
+
+    // Zitadel OIDC PKCE path.
+    const code    = params.get('code')
+    const err     = params.get('error')
     const errDesc = params.get('error_description')
 
     if (err) {

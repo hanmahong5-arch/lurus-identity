@@ -7,6 +7,7 @@ import SubscriptionsPage from './pages/Subscriptions'
 import RedeemPage from './pages/Redeem'
 import AdminPage from './pages/Admin'
 import CallbackPage from './pages/Callback'
+import LoginPage from './pages/Login'
 import { useStore } from './store'
 
 export default function App() {
@@ -19,7 +20,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* OIDC callback — outside Layout, no auth required */}
+        {/* Auth pages — outside Layout, no auth required */}
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/callback" element={<CallbackPage />} />
 
         <Route path="/" element={<Layout />}>

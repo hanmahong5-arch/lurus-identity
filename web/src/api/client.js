@@ -1,28 +1,30 @@
 import axios from 'axios'
-import { login } from '../auth'
+import { getToken, login } from '../auth'
 
 const client = axios.create({
   baseURL: '/api/v1',
   timeout: 15000,
 })
 
-// Attach JWT from localStorage
+// Attach JWT (lurus session token preferred over Zitadel token)
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
 
-// On 401: initiate OIDC PKCE login flow
+// On 401: redirect to the login page so the user can choose their login method.
 client.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Don't redirect if already on /callback (avoids loop)
-      if (!window.location.pathname.startsWith('/callback')) {
-        login()
+      const path = window.location.pathname
+      // Avoid redirect loops on auth-related pages.
+      if (!path.startsWith('/callback') && !path.startsWith('/login')) {
+        sessionStorage.setItem('login_return', path || '/wallet')
+        window.location.href = '/login'
       }
     }
     return Promise.reject(err)

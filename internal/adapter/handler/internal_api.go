@@ -103,6 +103,23 @@ func (h *InternalHandler) GetSubscription(c *gin.Context) {
 	c.JSON(http.StatusOK, sub)
 }
 
+// GetAccountByOAuth looks up an account by OAuth provider and provider_id.
+// GET /internal/v1/accounts/by-oauth/:provider/:provider_id
+func (h *InternalHandler) GetAccountByOAuth(c *gin.Context) {
+	provider := c.Param("provider")
+	providerID := c.Param("provider_id")
+	a, err := h.accounts.GetByOAuthBinding(c.Request.Context(), provider, providerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+	if a == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, a)
+}
+
 // ReportUsage receives LLM usage reports from lurus-api for VIP accumulation.
 // POST /internal/v1/usage/report
 func (h *InternalHandler) ReportUsage(c *gin.Context) {

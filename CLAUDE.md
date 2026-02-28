@@ -91,6 +91,7 @@ psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/002_billing_schema.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/003_seed_products.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/004_renewal_fields.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/005_invoice_refund.sql
+psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/006_admin_settings.sql
 
 # One-time lurus-api data migration (maintenance window only)
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f scripts/migrate-from-lurus-api.sql
@@ -139,6 +140,9 @@ ssh root@100.98.57.55 "kubectl logs -f deployment/lurus-identity -n lurus-identi
 | `CREEM_API_KEY` | _(empty)_ | Creem API key |
 | `CREEM_WEBHOOK_SECRET` | _(empty)_ | Creem webhook secret |
 | `CREEM_RETURN_URL` | _(empty)_ | Creem post-payment redirect |
+| `WECHAT_SERVER_ADDRESS` | _(empty)_ | WeChat proxy base URL (empty = WeChat login disabled) |
+| `WECHAT_SERVER_TOKEN` | _(empty)_ | Bearer token for WeChat proxy |
+| `SESSION_SECRET` | _(empty)_ | HS256 secret for lurus session tokens (min 32 bytes; empty = disabled) |
 | `EMAIL_SMTP_HOST` | _(empty)_ | SMTP host (empty = noop sender) |
 | `EMAIL_SMTP_PORT` | `587` | SMTP port |
 | `EMAIL_SMTP_USER` | _(empty)_ | SMTP username |

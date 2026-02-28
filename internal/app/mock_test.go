@@ -124,6 +124,22 @@ func (m *mockAccountStore) UpsertOAuthBinding(_ context.Context, b *entity.OAuth
 	return nil
 }
 
+func (m *mockAccountStore) GetByOAuthBinding(_ context.Context, provider, providerID string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, b := range m.bindings {
+		if b.Provider == provider && b.ProviderID == providerID {
+			a, ok := m.byID[b.AccountID]
+			if !ok {
+				return nil, nil
+			}
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 // ── walletStore mock ──────────────────────────────────────────────────────────
 
 type mockWalletStore struct {

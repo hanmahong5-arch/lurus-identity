@@ -1,4 +1,8 @@
-// OIDC PKCE authentication for lurus-identity SPA.
+// Authentication module for lurus-identity SPA.
+// Supports two token types:
+//   1. Zitadel OIDC PKCE tokens  → stored in localStorage['token']
+//   2. Lurus session tokens (WeChat login) → stored in localStorage['lurus_token']
+//
 // No external library — uses Web Crypto API (supported in all modern browsers).
 
 const ISSUER      = 'https://auth.lurus.cn'
@@ -31,6 +35,23 @@ async function generatePKCE() {
   const verifier  = randomString(64)
   const challenge = base64url(await sha256(verifier))
   return { verifier, challenge }
+}
+
+// ── Token management ──────────────────────────────────────────────────────────
+
+/**
+ * Returns the current active token for API calls.
+ * Prefers lurus session token (WeChat login) over Zitadel token.
+ */
+export function getToken() {
+  return localStorage.getItem('lurus_token') || localStorage.getItem('token') || ''
+}
+
+/**
+ * Stores a lurus-issued session token (received from WeChat OAuth callback).
+ */
+export function storeLurusToken(token) {
+  localStorage.setItem('lurus_token', token)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -89,6 +110,7 @@ export async function handleCallback(code) {
 /** Clear session and redirect to Zitadel end_session endpoint. */
 export function logout() {
   localStorage.removeItem('token')
+  localStorage.removeItem('lurus_token')
   sessionStorage.clear()
   const params = new URLSearchParams({
     client_id:               CLIENT_ID,
@@ -97,7 +119,7 @@ export function logout() {
   window.location.href = `${ISSUER}/oidc/v1/end_session?${params}`
 }
 
-/** Returns true if a token exists in localStorage (not validated server-side). */
+/** Returns true if any token exists in localStorage (not validated server-side). */
 export function isLoggedIn() {
-  return !!localStorage.getItem('token')
+  return !!(localStorage.getItem('token') || localStorage.getItem('lurus_token'))
 }

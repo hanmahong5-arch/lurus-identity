@@ -117,6 +117,72 @@ func (s *AccountService) BindOAuth(ctx context.Context, accountID int64, provide
 	})
 }
 
+// UpsertByWechat finds or creates an account for a WeChat OAuth login.
+// The OAuthBinding (provider=wechat, provider_id=wechatID) is the canonical lookup key.
+// New accounts use unique placeholder values for email and zitadel_sub so that the
+// DB UNIQUE constraints are satisfied without requiring Zitadel credentials.
+func (s *AccountService) UpsertByWechat(ctx context.Context, wechatID string) (*entity.Account, error) {
+	if wechatID == "" {
+		return nil, fmt.Errorf("wechat: empty wechatID")
+	}
+	// 1. Look up existing OAuth binding.
+	a, err := s.accounts.GetByOAuthBinding(ctx, "wechat", wechatID)
+	if err != nil {
+		return nil, fmt.Errorf("oauth binding lookup: %w", err)
+	}
+	if a != nil {
+		return a, nil
+	}
+
+	// 2. New WeChat user — create account with unique placeholder credentials.
+	// Email and ZitadelSub have UNIQUE constraints in the DB, so we use a
+	// per-user placeholder that can be replaced when the user binds a real email.
+	affCode, err := generateAffCode()
+	if err != nil {
+		return nil, fmt.Errorf("generate aff code: %w", err)
+	}
+	a = &entity.Account{
+		ZitadelSub:  "wechat:" + wechatID,
+		Email:       "wechat." + wechatID + "@noreply.lurus.cn",
+		DisplayName: "微信用户",
+		AffCode:     affCode,
+		Status:      entity.AccountStatusActive,
+	}
+	if err := s.accounts.Create(ctx, a); err != nil {
+		return nil, fmt.Errorf("create wechat account: %w", err)
+	}
+
+	// Assign human-readable LurusID after insert (needs auto-increment ID).
+	a.LurusID = entity.GenerateLurusID(a.ID)
+	if err := s.accounts.Update(ctx, a); err != nil {
+		return nil, fmt.Errorf("set lurus_id: %w", err)
+	}
+
+	// 3. Create OAuth binding.
+	if err := s.accounts.UpsertOAuthBinding(ctx, &entity.OAuthBinding{
+		AccountID:  a.ID,
+		Provider:   "wechat",
+		ProviderID: wechatID,
+	}); err != nil {
+		return nil, fmt.Errorf("create oauth binding: %w", err)
+	}
+
+	// 4. Bootstrap wallet and VIP.
+	if _, err := s.wallets.GetOrCreate(ctx, a.ID); err != nil {
+		return nil, fmt.Errorf("create wallet: %w", err)
+	}
+	if _, err := s.vip.GetOrCreate(ctx, a.ID); err != nil {
+		return nil, fmt.Errorf("create vip: %w", err)
+	}
+
+	return a, nil
+}
+
+// GetByOAuthBinding looks up an account via its third-party OAuth binding.
+func (s *AccountService) GetByOAuthBinding(ctx context.Context, provider, providerID string) (*entity.Account, error) {
+	return s.accounts.GetByOAuthBinding(ctx, provider, providerID)
+}
+
 // generateAffCode produces a random 8-character hex referral code.
 func generateAffCode() (string, error) {
 	b := make([]byte, 4)

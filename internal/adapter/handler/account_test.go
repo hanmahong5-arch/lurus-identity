@@ -1,0 +1,230 @@
+package handler
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
+)
+
+func TestAccountHandler_GetMe(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-1", Email: "me@x.com", DisplayName: "Me"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	r := testRouter()
+	r.GET("/api/v1/account/me", withAccountID(acct.ID), h.GetMe)
+
+	t.Run("authenticated_user", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d, body: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp["account"] == nil {
+			t.Error("response missing 'account' field")
+		}
+		if resp["vip"] == nil {
+			t.Error("response missing 'vip' field")
+		}
+	})
+
+	t.Run("missing_account_id_returns_404", func(t *testing.T) {
+		r2 := testRouter()
+		r2.GET("/api/v1/account/me", withAccountID(0), h.GetMe) // 0 = no account
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me", nil)
+		r2.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+		}
+	})
+}
+
+func TestAccountHandler_UpdateMe(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-u", Email: "u@x.com", DisplayName: "Old"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+
+	tests := []struct {
+		name   string
+		body   map[string]string
+		status int
+	}{
+		{"update_display_name", map[string]string{"display_name": "New"}, http.StatusOK},
+		{"update_locale", map[string]string{"locale": "zh-CN"}, http.StatusOK},
+		{"empty_body_still_ok", map[string]string{}, http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := testRouter()
+			r.PUT("/api/v1/account/me", withAccountID(acct.ID), h.UpdateMe)
+			body, _ := json.Marshal(tt.body)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/account/me", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			if w.Code != tt.status {
+				t.Errorf("status = %d, want %d, body: %s", w.Code, tt.status, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAccountHandler_GetServices(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-s", Email: "s@x.com"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	r := testRouter()
+	r.GET("/api/v1/account/me/services", withAccountID(acct.ID), h.GetServices)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/services", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	// "services" key must exist in response (value can be null for empty list)
+	if _, ok := resp["services"]; !ok {
+		t.Error("response missing 'services' key")
+	}
+}
+
+func TestAccountHandler_AdminListAccounts(t *testing.T) {
+	as := newMockAccountStore()
+	as.seed(entity.Account{ZitadelSub: "sub-1", Email: "a1@x.com"})
+	as.seed(entity.Account{ZitadelSub: "sub-2", Email: "a2@x.com"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+
+	tests := []struct {
+		name     string
+		query    string
+		status   int
+	}{
+		{"default_pagination", "", http.StatusOK},
+		{"custom_page", "?page=1&page_size=10", http.StatusOK},
+		{"negative_page_normalized", "?page=-1&page_size=200", http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := testRouter()
+			r.GET("/admin/v1/accounts", h.AdminListAccounts)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/admin/v1/accounts"+tt.query, nil)
+			r.ServeHTTP(w, req)
+			if w.Code != tt.status {
+				t.Errorf("status = %d, want %d", w.Code, tt.status)
+			}
+			var resp map[string]interface{}
+			json.Unmarshal(w.Body.Bytes(), &resp)
+			if resp["data"] == nil {
+				t.Error("response missing 'data' field")
+			}
+			// Verify page normalization
+			if tt.name == "negative_page_normalized" {
+				if page, ok := resp["page"].(float64); ok && page < 1 {
+					t.Errorf("page should be normalized to >= 1, got %v", page)
+				}
+			}
+		})
+	}
+}
+
+func TestAccountHandler_AdminGetAccount(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-admin", Email: "admin@x.com"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	r := testRouter()
+	r.GET("/admin/v1/accounts/:id", h.AdminGetAccount)
+
+	tests := []struct {
+		name   string
+		id     string
+		status int
+	}{
+		{"found", "1", http.StatusOK},
+		{"not_found", "999", http.StatusNotFound},
+		{"invalid_id", "abc", http.StatusBadRequest},
+	}
+
+	_ = acct
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/admin/v1/accounts/"+tt.id, nil)
+			r.ServeHTTP(w, req)
+			if w.Code != tt.status {
+				t.Errorf("status = %d, want %d", w.Code, tt.status)
+			}
+		})
+	}
+}
+
+func TestAccountHandler_AdminGrantEntitlement(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-grant", Email: "grant@x.com"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	r := testRouter()
+	r.POST("/admin/v1/accounts/:id/grant", h.AdminGrantEntitlement)
+
+	tests := []struct {
+		name   string
+		id     string
+		body   map[string]string
+		status int
+	}{
+		{
+			"valid_grant",
+			"1",
+			map[string]string{"product_id": "lurus_api", "key": "rate_limit", "value": "500"},
+			http.StatusOK,
+		},
+		{
+			"missing_key",
+			"1",
+			map[string]string{"product_id": "lurus_api", "value": "500"},
+			http.StatusBadRequest,
+		},
+		{
+			"account_not_found",
+			"999",
+			map[string]string{"product_id": "lurus_api", "key": "rate_limit", "value": "500"},
+			http.StatusNotFound,
+		},
+		{
+			"invalid_id",
+			"abc",
+			map[string]string{"product_id": "lurus_api", "key": "rate_limit", "value": "500"},
+			http.StatusBadRequest,
+		},
+	}
+
+	_ = acct
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(tt.body)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/admin/v1/accounts/"+tt.id+"/grant", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			if w.Code != tt.status {
+				t.Errorf("status = %d, want %d, body: %s", w.Code, tt.status, w.Body.String())
+			}
+		})
+	}
+}

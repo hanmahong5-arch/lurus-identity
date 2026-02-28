@@ -23,7 +23,10 @@ type Deps struct {
 	Refunds       *handler.RefundHandler
 	AdminOps      *handler.AdminOpsHandler
 	Reports       *handler.ReportHandler
-	InternalKey   string // secret for /internal/* bearer auth
+	AdminConfig   *handler.AdminConfigHandler
+	WechatAuth    *handler.WechatAuthHandler    // nil when WeChat login is not configured
+	Organizations *handler.OrganizationHandler  // organization management
+	InternalKey   string                        // secret for /internal/* bearer auth
 	JWT           *auth.JWTMiddleware
 	RateLimit     *ratelimit.Limiter
 }
@@ -39,7 +42,18 @@ func Build(deps Deps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "lurus-identity"})
 	})
 
-	// Public user API — requires Zitadel JWT
+	// WeChat OAuth routes — no JWT auth (handles the browser redirect dance).
+	if deps.WechatAuth != nil {
+		r.GET("/api/v1/auth/wechat", deps.WechatAuth.Initiate)
+		r.GET("/api/v1/auth/wechat/callback", deps.WechatAuth.Callback)
+	}
+
+	// Public QR code endpoint — unauthenticated, read-only.
+	if deps.AdminConfig != nil {
+		r.GET("/api/v1/public/qrcode/:type", deps.AdminConfig.GetPublicQRCode)
+	}
+
+	// Public user API — requires Zitadel JWT or lurus session token
 	v1 := r.Group("/api/v1")
 	v1.Use(deps.JWT.Auth())
 	if deps.RateLimit != nil {
@@ -81,6 +95,17 @@ func Build(deps Deps) *gin.Engine {
 		v1.POST("/refunds", deps.Refunds.RequestRefund)
 		v1.GET("/refunds", deps.Refunds.ListRefunds)
 		v1.GET("/refunds/:refund_no", deps.Refunds.GetRefund)
+
+		// Organizations
+		v1.POST("/organizations", deps.Organizations.Create)
+		v1.GET("/organizations", deps.Organizations.ListMine)
+		v1.GET("/organizations/:id", deps.Organizations.Get)
+		v1.POST("/organizations/:id/members", deps.Organizations.AddMember)
+		v1.DELETE("/organizations/:id/members/:uid", deps.Organizations.RemoveMember)
+		v1.GET("/organizations/:id/api-keys", deps.Organizations.ListAPIKeys)
+		v1.POST("/organizations/:id/api-keys", deps.Organizations.CreateAPIKey)
+		v1.DELETE("/organizations/:id/api-keys/:kid", deps.Organizations.RevokeAPIKey)
+		v1.GET("/organizations/:id/wallet", deps.Organizations.GetWallet)
 	}
 
 	// Internal service-to-service API — bearer token auth
@@ -92,9 +117,13 @@ func Build(deps Deps) *gin.Engine {
 		internal.GET("/accounts/:id/entitlements/:product_id", deps.Internal.GetEntitlements)
 		internal.GET("/accounts/:id/subscription/:product_id", deps.Internal.GetSubscription)
 		internal.POST("/usage/report", deps.Internal.ReportUsage)
+		// Lookup by third-party OAuth binding (e.g. wechat openid)
+		internal.GET("/accounts/by-oauth/:provider/:provider_id", deps.Internal.GetAccountByOAuth)
+		// Resolve org API key to organization (used by lurus-api and other services)
+		internal.POST("/orgs/resolve-api-key", deps.Organizations.ResolveAPIKey)
 	}
 
-	// Admin API — requires admin JWT role
+	// Admin API — requires admin JWT role (Zitadel only, not lurus session tokens)
 	admin := r.Group("/admin/v1")
 	admin.Use(deps.JWT.AdminAuth())
 	{
@@ -120,6 +149,17 @@ func Build(deps Deps) *gin.Engine {
 
 		// Admin Reports: financial reconciliation
 		admin.GET("/reports/financial", deps.Reports.FinancialReport)
+
+		// Admin Settings: runtime payment config + QR code management
+		if deps.AdminConfig != nil {
+			admin.GET("/settings", deps.AdminConfig.ListSettings)
+			admin.PUT("/settings", deps.AdminConfig.UpdateSettings)
+			admin.POST("/settings/qrcode", deps.AdminConfig.UploadQRCode)
+		}
+
+		// Admin Organizations
+		admin.GET("/organizations", deps.Organizations.AdminList)
+		admin.PATCH("/organizations/:id", deps.Organizations.AdminUpdateStatus)
 	}
 
 	// Payment provider webhooks — signature-verified per-provider
@@ -128,7 +168,7 @@ func Build(deps Deps) *gin.Engine {
 		webhooks.Use(deps.RateLimit.PerIP())
 	}
 	{
-		webhooks.GET("/epay", deps.Webhooks.EpayNotify)  // 易支付 uses GET callbacks
+		webhooks.GET("/epay", deps.Webhooks.EpayNotify) // 易支付 uses GET callbacks
 		webhooks.POST("/stripe", deps.Webhooks.StripeWebhook)
 		webhooks.POST("/creem", deps.Webhooks.CreemWebhook)
 	}

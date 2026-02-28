@@ -120,6 +120,18 @@ func run(ctx context.Context, cfg *config.Config) error {
 	vipRepo := repo.NewVIPRepo(db)
 	invoiceRepo := repo.NewInvoiceRepo(db)
 	refundRepo := repo.NewRefundRepo(db)
+	adminSettingsRepo := repo.NewAdminSettingsRepo(db)
+	orgRepo := repo.NewOrganizationRepo(db)
+
+	// --- Admin Config Service (DB-first payment config override) ---
+	adminConfigSvc := app.NewAdminConfigService(adminSettingsRepo)
+	if err := adminConfigSvc.Load(ctx); err != nil {
+		// Non-fatal: log and continue with env var defaults.
+		slog.Warn("admin config load failed, using env defaults", "err", err)
+	} else {
+		// Overlay non-empty DB values onto cfg before payment provider init.
+		adminConfigSvc.ApplyToConfig(cfg)
+	}
 
 	// --- Cache ---
 	entCache := cache.NewEntitlementCache(rdb, cfg.CacheEntitlementTTL)
@@ -133,6 +145,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	accountSvc := app.NewAccountService(accountRepo, walletRepo, vipRepo)
 	invoiceSvc := app.NewInvoiceService(invoiceRepo, walletRepo)
 	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo)
+	orgSvc := app.NewOrganizationService(orgRepo)
 
 	// --- NATS Publisher ---
 	publisher, err := identitynats.NewPublisher(nc)
@@ -158,7 +171,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("init creem provider: %w", err)
 	}
 
-	// --- Auth Middleware (Zitadel JWKS JWT) ---
+	// --- Auth Middleware (Zitadel JWKS JWT + lurus session token) ---
 	jwtValidator := auth.NewValidator(auth.ValidatorConfig{
 		Issuer:     cfg.ZitadelIssuer,
 		Audience:   cfg.ZitadelAudience,
@@ -166,9 +179,10 @@ func run(ctx context.Context, cfg *config.Config) error {
 		JWKSTTL:    time.Hour,
 		AdminRoles: []string{cfg.ZitadelAdminRole},
 	})
-	// AccountLookup: resolve Zitadel sub → lurus account_id (Redis sub-cache → DB fallback).
+	// AccountLookup: resolve Zitadel claims → lurus account_id (Redis cache → DB upsert on miss).
 	accountLookup := buildAccountLookup(rdb, accountSvc)
-	jwtMiddleware := auth.NewJWTMiddleware(jwtValidator, accountLookup)
+	// SessionSecret enables HS256 lurus session tokens (WeChat login). Empty = disabled.
+	jwtMiddleware := auth.NewJWTMiddleware(jwtValidator, accountLookup, cfg.SessionSecret)
 
 	// --- Rate Limiter ---
 	rateLimiter := ratelimit.New(rdb, ratelimit.DefaultConfig(
@@ -190,6 +204,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	refundH := handler.NewRefundHandler(refundSvc)
 	adminOpsH := handler.NewAdminOpsHandler(referralSvc)
 	reportH := handler.NewReportHandler(db)
+	adminConfigH := handler.NewAdminConfigHandler(adminConfigSvc)
+	wechatAuthH := handler.NewWechatAuthHandler(accountSvc, cfg.WechatServerAddress, cfg.WechatServerToken, cfg.SessionSecret)
+	orgH := handler.NewOrganizationHandler(orgSvc)
 
 	engine := router.Build(router.Deps{
 		Accounts:      accountH,
@@ -202,6 +219,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 		Refunds:       refundH,
 		AdminOps:      adminOpsH,
 		Reports:       reportH,
+		AdminConfig:   adminConfigH,
+		WechatAuth:    wechatAuthH,
+		Organizations: orgH,
 		InternalKey:   cfg.InternalAPIKey,
 		JWT:           jwtMiddleware,
 		RateLimit:     rateLimiter,
@@ -305,11 +325,13 @@ func run(ctx context.Context, cfg *config.Config) error {
 
 // buildAccountLookup creates an AccountLookup function that caches Zitadel sub → account_id
 // in Redis (TTL 10min) to avoid a DB round-trip on every authenticated request.
+// On first login (DB miss), the account is auto-created via UpsertByZitadelSub so that
+// a valid Zitadel JWT never produces a 401 due to a missing local record.
 func buildAccountLookup(rdb *redis.Client, accountSvc *app.AccountService) auth.AccountLookup {
 	const subCacheTTL = 10 * time.Minute
 
-	return func(ctx context.Context, sub string) (int64, error) {
-		key := "sub:id:" + sub
+	return func(ctx context.Context, claims *auth.Claims) (int64, error) {
+		key := "sub:id:" + claims.Sub
 
 		// Fast path: Redis cache.
 		val, err := rdb.Get(ctx, key).Int64()
@@ -317,16 +339,13 @@ func buildAccountLookup(rdb *redis.Client, accountSvc *app.AccountService) auth.
 			return val, nil
 		}
 
-		// Slow path: DB lookup.
-		account, err := accountSvc.GetByZitadelSub(ctx, sub)
+		// Slow path: DB lookup → auto-upsert on miss so first-time logins succeed.
+		account, err := accountSvc.UpsertByZitadelSub(ctx, claims.Sub, claims.Email, claims.Name, "")
 		if err != nil {
-			return 0, fmt.Errorf("account lookup: %w", err)
-		}
-		if account == nil {
-			return 0, fmt.Errorf("account not found for sub %q", sub)
+			return 0, fmt.Errorf("account upsert: %w", err)
 		}
 
-		// Cache the result.
+		// Cache the resolved account_id.
 		_ = rdb.Set(ctx, key, account.ID, subCacheTTL).Err()
 
 		return account.ID, nil

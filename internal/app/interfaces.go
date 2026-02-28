@@ -17,6 +17,8 @@ type accountStore interface {
 	GetByLurusID(ctx context.Context, lurusID string) (*entity.Account, error)
 	List(ctx context.Context, keyword string, page, pageSize int) ([]*entity.Account, int64, error)
 	UpsertOAuthBinding(ctx context.Context, b *entity.OAuthBinding) error
+	// GetByOAuthBinding looks up an account via its OAuth provider binding.
+	GetByOAuthBinding(ctx context.Context, provider, providerID string) (*entity.Account, error)
 }
 
 // walletStore is the minimal DB interface required by WalletService and VIPService.
@@ -101,4 +103,28 @@ type refundStore interface {
 	UpdateStatus(ctx context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error
 	MarkCompleted(ctx context.Context, refundNo string, completedAt time.Time) error
 	ListByAccount(ctx context.Context, accountID int64, page, pageSize int) ([]entity.Refund, int64, error)
+}
+
+// orgStore is the minimal DB interface required by OrganizationService.
+type orgStore interface {
+	// organization CRUD
+	Create(ctx context.Context, org *entity.Organization) error
+	GetByID(ctx context.Context, id int64) (*entity.Organization, error)
+	GetBySlug(ctx context.Context, slug string) (*entity.Organization, error)
+	ListByAccountID(ctx context.Context, accountID int64) ([]entity.Organization, error)
+	UpdateStatus(ctx context.Context, id int64, status string) error
+	ListAll(ctx context.Context, limit, offset int) ([]entity.Organization, error)
+	// members
+	AddMember(ctx context.Context, m *entity.OrgMember) error
+	RemoveMember(ctx context.Context, orgID, accountID int64) error
+	GetMember(ctx context.Context, orgID, accountID int64) (*entity.OrgMember, error)
+	ListMembers(ctx context.Context, orgID int64) ([]entity.OrgMember, error)
+	// api keys
+	CreateAPIKey(ctx context.Context, k *entity.OrgAPIKey) error
+	GetAPIKeyByHash(ctx context.Context, hash string) (*entity.OrgAPIKey, error)
+	ListAPIKeys(ctx context.Context, orgID int64) ([]entity.OrgAPIKey, error)
+	RevokeAPIKey(ctx context.Context, id int64) error
+	TouchAPIKey(ctx context.Context, id int64) error
+	// wallet
+	GetOrCreateWallet(ctx context.Context, orgID int64) (*entity.OrgWallet, error)
 }

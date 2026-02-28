@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_org_api_keys_org ON identity.org_api_keys(org_id)
 
 -- billing.org_wallets (mirrors billing.wallets structure)
 CREATE TABLE IF NOT EXISTS billing.org_wallets (
-    org_id          BIGINT         PRIMARY KEY REFERENCES identity.organizations(id),
+    org_id          BIGINT         PRIMARY KEY REFERENCES identity.organizations(id) ON DELETE CASCADE,
     balance         DECIMAL(14,4)  NOT NULL DEFAULT 0,
     frozen          DECIMAL(14,4)  NOT NULL DEFAULT 0,
     lifetime_topup  DECIMAL(14,4)  NOT NULL DEFAULT 0,

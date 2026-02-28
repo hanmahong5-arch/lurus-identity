@@ -97,6 +97,22 @@ func (r *AccountRepo) UpsertOAuthBinding(ctx context.Context, b *entity.OAuthBin
 		FirstOrCreate(b).Error
 }
 
+// GetByOAuthBinding looks up an account via its OAuth provider binding.
+// Returns nil if no matching binding exists.
+func (r *AccountRepo) GetByOAuthBinding(ctx context.Context, provider, providerID string) (*entity.Account, error) {
+	var binding entity.OAuthBinding
+	err := r.db.WithContext(ctx).
+		Where("provider = ? AND provider_id = ?", provider, providerID).
+		First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get oauth binding: %w", err)
+	}
+	return r.GetByID(ctx, binding.AccountID)
+}
+
 func (r *AccountRepo) GetOAuthBindings(ctx context.Context, accountID int64) ([]entity.OAuthBinding, error) {
 	var bindings []entity.OAuthBinding
 	err := r.db.WithContext(ctx).Where("account_id = ?", accountID).Find(&bindings).Error

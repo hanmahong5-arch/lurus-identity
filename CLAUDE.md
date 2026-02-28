@@ -92,6 +92,7 @@ psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/003_seed_products.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/004_renewal_fields.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/005_invoice_refund.sql
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/006_admin_settings.sql
+psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f migrations/007_organizations.sql
 
 # One-time lurus-api data migration (maintenance window only)
 psql $DATABASE_DSN -v ON_ERROR_STOP=1 -f scripts/migrate-from-lurus-api.sql

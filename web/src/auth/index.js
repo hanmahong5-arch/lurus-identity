@@ -83,7 +83,11 @@ export async function login() {
 
 /**
  * Exchange authorization code for tokens (called from /callback page).
- * Returns the access_token string on success.
+ * Returns the JWT string on success.
+ *
+ * Zitadel SPA apps issue opaque access_tokens by default, which the backend
+ * JWT validator cannot parse. We prefer the id_token (always a signed JWT with
+ * sub/email/name claims) for backend API authentication.
  */
 export async function handleCallback(code) {
   const verifier = sessionStorage.getItem('pkce_verifier')
@@ -104,10 +108,12 @@ export async function handleCallback(code) {
   const data = await res.json()
   if (!res.ok) throw new Error(data.error_description || data.error || 'Token exchange failed')
 
-  localStorage.setItem('token', data.access_token)
+  // Prefer id_token (JWT) over access_token (may be opaque).
+  const jwt = data.id_token || data.access_token
+  localStorage.setItem('token', jwt)
   sessionStorage.removeItem('pkce_verifier')
 
-  return data.access_token
+  return jwt
 }
 
 /** Clear session and redirect to Zitadel end_session endpoint. */

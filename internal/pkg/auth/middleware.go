@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -64,12 +65,22 @@ func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 		// Slow path: Zitadel JWT validation (may fetch JWKS on cache miss).
 		claims, err := m.validator.Validate(c.Request.Context(), token)
 		if err != nil {
+			slog.Warn("auth: JWT validation failed",
+				"path", c.Request.URL.Path,
+				"err", err,
+				"token_prefix", safeTokenPrefix(token),
+			)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
 
 		accountID, err := m.lookup(c.Request.Context(), claims)
 		if err != nil {
+			slog.Error("auth: account lookup failed",
+				"path", c.Request.URL.Path,
+				"sub", claims.Sub,
+				"err", err,
+			)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account lookup failed"})
 			return
 		}
@@ -94,17 +105,32 @@ func (m *JWTMiddleware) AdminAuth() gin.HandlerFunc {
 
 		claims, err := m.validator.Validate(c.Request.Context(), token)
 		if err != nil {
+			slog.Warn("auth: admin JWT validation failed",
+				"path", c.Request.URL.Path,
+				"err", err,
+				"token_prefix", safeTokenPrefix(token),
+			)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
 
 		if !m.validator.HasAdminRole(claims) {
+			slog.Warn("auth: admin role missing",
+				"path", c.Request.URL.Path,
+				"sub", claims.Sub,
+				"roles", claims.Roles,
+			)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 			return
 		}
 
 		accountID, err := m.lookup(c.Request.Context(), claims)
 		if err != nil {
+			slog.Error("auth: admin account lookup failed",
+				"path", c.Request.URL.Path,
+				"sub", claims.Sub,
+				"err", err,
+			)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account lookup failed"})
 			return
 		}
@@ -135,6 +161,14 @@ func extractBearerToken(c *gin.Context) (string, error) {
 type errUnauthorized struct{ msg string }
 
 func (e *errUnauthorized) Error() string { return e.msg }
+
+// safeTokenPrefix returns the first 16 chars of a token for debug logging.
+func safeTokenPrefix(token string) string {
+	if len(token) <= 16 {
+		return token[:len(token)/2] + "..."
+	}
+	return token[:16] + "..."
+}
 
 // GetAccountID retrieves the account ID set by Auth middleware.
 // Returns 0 if not set (should not happen on authenticated routes).

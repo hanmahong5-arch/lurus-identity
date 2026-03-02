@@ -36,6 +36,7 @@ type Deps struct {
 // Build constructs and returns the root Gin engine.
 func Build(deps Deps) *gin.Engine {
 	r := gin.New()
+	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(cors.Default())
 

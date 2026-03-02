@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Spin, Typography } from '@douyinfe/semi-ui'
 import { handleCallback, storeLurusToken } from '../../auth'
 import { linkWechatAndComplete } from '../../api/zlogin'
+import { useStore } from '../../store'
 
 // Session storage key set by ZLogin when the user triggers WeChat auth within an OIDC flow.
 const OIDC_REQ_KEY = 'zlogin_oidc_req'
@@ -11,6 +12,7 @@ const { Text } = Typography
 
 export default function CallbackPage() {
   const navigate = useNavigate()
+  const init = useStore((s) => s.init)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -35,9 +37,11 @@ export default function CallbackPage() {
         return
       }
 
-      const returnTo = sessionStorage.getItem('login_return') || '/wallet'
-      sessionStorage.removeItem('login_return')
-      navigate(returnTo, { replace: true })
+      init().finally(() => {
+        const returnTo = sessionStorage.getItem('login_return') || '/wallet'
+        sessionStorage.removeItem('login_return')
+        navigate(returnTo, { replace: true })
+      })
       return
     }
 
@@ -57,6 +61,11 @@ export default function CallbackPage() {
     }
 
     handleCallback(code)
+      .then(() => {
+        // Pre-load account data before navigating so the target page
+        // doesn't start with empty state.
+        return init()
+      })
       .then(() => {
         const returnTo = sessionStorage.getItem('login_return') || '/wallet'
         sessionStorage.removeItem('login_return')

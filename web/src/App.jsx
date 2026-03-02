@@ -11,12 +11,17 @@ import LoginPage from './pages/Login'
 import ZLoginPage from './pages/ZLogin'
 import HubPage from './pages/Hub'
 import { useStore } from './store'
+import { isLoggedIn } from './auth'
 
 export default function App() {
   const init = useStore((s) => s.init)
 
   useEffect(() => {
-    init()
+    // Skip init on auth pages — /callback hasn't stored the token yet,
+    // and /login + /zlogin don't need API data.
+    const path = window.location.pathname
+    if (['/callback', '/login', '/zlogin'].includes(path)) return
+    if (isLoggedIn()) init()
   }, [])
 
   return (

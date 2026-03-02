@@ -9,4 +9,5 @@ resources:
   - service.yaml
   - ingressroute.yaml
   - hpa.yaml
+  - pdb.yaml
   - servicemonitor.yaml

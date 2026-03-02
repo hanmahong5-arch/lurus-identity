@@ -27,8 +27,9 @@ type Deps struct {
 	WechatAuth    *handler.WechatAuthHandler   // nil when WeChat login is not configured
 	WechatOAuth   *handler.WechatOAuthHandler  // nil when WeChat OAuth2 adapter is not configured
 	ZLogin        *handler.ZLoginHandler       // nil when custom OIDC login is not configured
-	Organizations *handler.OrganizationHandler // organization management
-	InternalKey   string                       // secret for /internal/* bearer auth
+	Organizations *handler.OrganizationHandler   // organization management
+	NewAPIProxy   *handler.NewAPIProxyHandler   // nil when newapi proxy is not configured
+	InternalKey   string                        // secret for /internal/* bearer auth
 	JWT           *auth.JWTMiddleware
 	RateLimit     *ratelimit.Limiter
 }
@@ -53,6 +54,7 @@ func Build(deps Deps) *gin.Engine {
 
 	// Custom OIDC login UI routes — no JWT auth (called by the unauthenticated /zlogin page).
 	if deps.ZLogin != nil {
+		r.POST("/api/v1/auth/login", deps.ZLogin.DirectLogin)
 		r.GET("/api/v1/auth/info", deps.ZLogin.GetAuthInfo)
 		r.POST("/api/v1/auth/zlogin/password", deps.ZLogin.SubmitPassword)
 		r.POST("/api/v1/auth/wechat/link-oidc", deps.ZLogin.LinkWechatAndComplete)
@@ -185,6 +187,13 @@ func Build(deps Deps) *gin.Engine {
 		// Admin Organizations
 		admin.GET("/organizations", deps.Organizations.AdminList)
 		admin.PATCH("/organizations/:id", deps.Organizations.AdminUpdateStatus)
+	}
+
+	// NewAPI admin proxy — reverse-proxies /proxy/newapi/* to the LLM gateway.
+	if deps.NewAPIProxy != nil {
+		newapi := r.Group("/proxy/newapi")
+		newapi.Use(deps.JWT.AdminAuth())
+		newapi.Any("/*path", deps.NewAPIProxy.Handle)
 	}
 
 	// Payment provider webhooks — signature-verified per-provider

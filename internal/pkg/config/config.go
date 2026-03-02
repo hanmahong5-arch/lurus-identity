@@ -80,6 +80,11 @@ type Config struct {
 	ShutdownTimeout     time.Duration
 	CacheEntitlementTTL time.Duration
 
+	// NewAPI admin proxy (identity admin panel → newapi backend)
+	NewAPIInternalURL      string // NEWAPI_INTERNAL_URL (e.g. http://lurus-newapi.lurus-system.svc:3000)
+	NewAPIAdminAccessToken string // NEWAPI_ADMIN_ACCESS_TOKEN
+	NewAPIAdminUserID      string // NEWAPI_ADMIN_USER_ID
+
 	// OpenTelemetry tracing
 	OtelEndpoint    string // OTEL_EXPORTER_OTLP_ENDPOINT (empty = noop)
 	OtelServiceName string // OTEL_SERVICE_NAME (default: lurus-identity)
@@ -127,6 +132,9 @@ func Load() (*Config, error) {
 		EmailFrom:           getEnv("EMAIL_FROM", ""),
 		ShutdownTimeout:     parseDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
 		CacheEntitlementTTL: parseDuration("CACHE_ENTITLEMENT_TTL", 5*time.Minute),
+		NewAPIInternalURL:      getEnv("NEWAPI_INTERNAL_URL", ""),
+		NewAPIAdminAccessToken: getEnv("NEWAPI_ADMIN_ACCESS_TOKEN", ""),
+		NewAPIAdminUserID:      getEnv("NEWAPI_ADMIN_USER_ID", ""),
 		OtelEndpoint:        getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OtelServiceName:     getEnv("OTEL_SERVICE_NAME", "lurus-identity"),
 	}

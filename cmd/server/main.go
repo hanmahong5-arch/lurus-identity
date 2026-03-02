@@ -215,6 +215,18 @@ func run(ctx context.Context, cfg *config.Config) error {
 	zloginH      := handler.NewZLoginHandler(accountSvc, cfg.ZitadelIssuer, cfg.ZitadelServiceAccountPAT, cfg.SessionSecret)
 	orgH         := handler.NewOrganizationHandler(orgSvc)
 
+	// --- NewAPI Admin Proxy (optional) ---
+	var newAPIProxyH *handler.NewAPIProxyHandler
+	if cfg.NewAPIInternalURL != "" {
+		var proxyErr error
+		newAPIProxyH, proxyErr = handler.NewNewAPIProxyHandler(
+			cfg.NewAPIInternalURL, cfg.NewAPIAdminAccessToken, cfg.NewAPIAdminUserID)
+		if proxyErr != nil {
+			return fmt.Errorf("init newapi proxy: %w", proxyErr)
+		}
+		slog.Info("newapi admin proxy enabled", "target", cfg.NewAPIInternalURL)
+	}
+
 	engine := router.Build(router.Deps{
 		Accounts:      accountH,
 		Subscriptions: subH,
@@ -231,6 +243,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 		WechatOAuth:   wechatOAuthH,
 		ZLogin:        zloginH,
 		Organizations: orgH,
+		NewAPIProxy:   newAPIProxyH,
 		InternalKey:   cfg.InternalAPIKey,
 		JWT:           jwtMiddleware,
 		RateLimit:     rateLimiter,

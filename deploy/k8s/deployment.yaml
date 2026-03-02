@@ -156,6 +156,24 @@ spec:
                   name: lurus-identity-secrets
                   key: WECHAT_OAUTH_CLIENT_SECRET
                   optional: true
+            - name: NEWAPI_INTERNAL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: NEWAPI_INTERNAL_URL
+                  optional: true
+            - name: NEWAPI_ADMIN_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: NEWAPI_ADMIN_ACCESS_TOKEN
+                  optional: true
+            - name: NEWAPI_ADMIN_USER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: NEWAPI_ADMIN_USER_ID
+                  optional: true
           resources:
             requests:
               memory: "128Mi"

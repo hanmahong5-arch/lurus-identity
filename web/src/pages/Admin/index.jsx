@@ -1,9 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import {
   Card, Typography, Table, Input, Button, Modal, InputNumber,
-  Toast, Tag, Tabs, TabPane, Form, Toast as SemiToast,
+  Toast, Tag, Tabs, TabPane, Form, Toast as SemiToast, Spin,
 } from '@douyinfe/semi-ui'
 import axios from 'axios'
+
+// Lazy-loaded NewAPI management tabs (only loaded when user clicks the tab).
+const ChannelsTab = lazy(() => import('./ChannelsTab'))
+const TokensTab = lazy(() => import('./TokensTab'))
+const UsageLogsTab = lazy(() => import('./UsageLogsTab'))
+const ModelsTab = lazy(() => import('./ModelsTab'))
+const GatewaySettingsTab = lazy(() => import('./GatewaySettingsTab'))
+
+function LazyTab({ children }) {
+  return (
+    <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>}>
+      {children}
+    </Suspense>
+  )
+}
 
 const { Title, Text } = Typography
 
@@ -367,7 +382,7 @@ export default function AdminPage() {
   return (
     <div>
       <Title heading={3} style={{ marginBottom: 24 }}>管理后台</Title>
-      <Tabs type="line">
+      <Tabs type="line" lazyRender>
         <TabPane tab="账号列表" itemKey="accounts">
           <div style={{ paddingTop: 16 }}>
             <AccountListTab />
@@ -376,6 +391,31 @@ export default function AdminPage() {
         <TabPane tab="系统配置" itemKey="settings">
           <div style={{ paddingTop: 16 }}>
             <SystemConfigTab />
+          </div>
+        </TabPane>
+        <TabPane tab="渠道管理" itemKey="channels">
+          <div style={{ paddingTop: 16 }}>
+            <LazyTab><ChannelsTab /></LazyTab>
+          </div>
+        </TabPane>
+        <TabPane tab="令牌管理" itemKey="tokens">
+          <div style={{ paddingTop: 16 }}>
+            <LazyTab><TokensTab /></LazyTab>
+          </div>
+        </TabPane>
+        <TabPane tab="使用日志" itemKey="logs">
+          <div style={{ paddingTop: 16 }}>
+            <LazyTab><UsageLogsTab /></LazyTab>
+          </div>
+        </TabPane>
+        <TabPane tab="模型管理" itemKey="models">
+          <div style={{ paddingTop: 16 }}>
+            <LazyTab><ModelsTab /></LazyTab>
+          </div>
+        </TabPane>
+        <TabPane tab="网关设置" itemKey="gateway">
+          <div style={{ paddingTop: 16 }}>
+            <LazyTab><GatewaySettingsTab /></LazyTab>
           </div>
         </TabPane>
       </Tabs>

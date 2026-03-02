@@ -13,6 +13,18 @@ import HubPage from './pages/Hub'
 import { useStore } from './store'
 import { isLoggedIn } from './auth'
 
+function RequireAuth({ children }) {
+  if (!isLoggedIn()) {
+    const path = window.location.pathname
+    if (path && path !== '/') {
+      sessionStorage.setItem('login_return', path)
+    }
+    window.location.href = '/login'
+    return null
+  }
+  return children
+}
+
 export default function App() {
   const init = useStore((s) => s.init)
 
@@ -33,7 +45,7 @@ export default function App() {
         {/* Custom Zitadel OIDC login UI — no auth, no layout wrapper */}
         <Route path="/zlogin" element={<ZLoginPage />} />
 
-        <Route path="/" element={<Layout />}>
+        <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
           <Route index element={<Navigate to="/hub" replace />} />
           <Route path="hub" element={<HubPage />} />
           <Route path="wallet" element={<WalletPage />} />

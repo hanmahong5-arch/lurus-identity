@@ -81,7 +81,7 @@ export default function CallbackPage() {
         <div style={{ marginTop: 16, color: '#f5222d' }}>登录失败</div>
         <Text type="tertiary" style={{ fontSize: 13 }}>{error}</Text>
         <div style={{ marginTop: 16 }}>
-          <a href="/">重新登录</a>
+          <a href="/login">重新登录</a>
         </div>
       </div>
     )

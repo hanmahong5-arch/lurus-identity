@@ -116,16 +116,23 @@ export async function handleCallback(code) {
   return jwt
 }
 
-/** Clear session and redirect to Zitadel end_session endpoint. */
+/** Clear session and redirect appropriately based on login method. */
 export function logout() {
+  const hasZitadelToken = !!localStorage.getItem('token')
   localStorage.removeItem('token')
   localStorage.removeItem('lurus_token')
   sessionStorage.clear()
-  const params = new URLSearchParams({
-    client_id:               CLIENT_ID,
-    post_logout_redirect_uri: window.location.origin,
-  })
-  window.location.href = `${ISSUER}/oidc/v1/end_session?${params}`
+  if (hasZitadelToken && CLIENT_ID) {
+    // Zitadel OIDC login — call end_session to clear the IdP session as well.
+    const params = new URLSearchParams({
+      client_id:               CLIENT_ID,
+      post_logout_redirect_uri: window.location.origin + '/login',
+    })
+    window.location.href = `${ISSUER}/oidc/v1/end_session?${params}`
+  } else {
+    // Direct login (lurus session token) — just redirect to login page.
+    window.location.href = '/login'
+  }
 }
 
 /** Returns true if any token exists in localStorage (not validated server-side). */

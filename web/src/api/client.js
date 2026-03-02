@@ -22,7 +22,7 @@ client.interceptors.response.use(
     if (err.response?.status === 401) {
       const path = window.location.pathname
       // Avoid redirect loops on auth-related pages.
-      if (!path.startsWith('/callback') && !path.startsWith('/login')) {
+      if (!path.startsWith('/callback') && !path.startsWith('/login') && !path.startsWith('/zlogin')) {
         sessionStorage.setItem('login_return', path || '/wallet')
         window.location.href = '/login'
       }

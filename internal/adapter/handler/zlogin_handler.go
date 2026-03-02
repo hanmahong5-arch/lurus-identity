@@ -165,6 +165,109 @@ func (h *ZLoginHandler) LinkWechatAndComplete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"callback_url": callbackURL})
 }
 
+// DirectLogin authenticates with email + password and returns a lurus session token.
+// POST /api/v1/auth/login  (no OIDC — stays entirely within identity.lurus.cn)
+func (h *ZLoginHandler) DirectLogin(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+
+	if h.sessionSecret == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "session tokens not configured"})
+		return
+	}
+
+	// Step 1: Verify credentials via Zitadel Session API.
+	sessionID, _, err := h.createSessionByCredentials(c.Request.Context(), req.Username, req.Password)
+	if err != nil {
+		slog.Warn("direct-login: credential check failed", "err", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	// Step 2: Fetch user info from the Zitadel session.
+	userID, loginName, displayName, err := h.getSessionUser(c.Request.Context(), sessionID)
+	if err != nil {
+		slog.Error("direct-login: fetch session user failed", "session_id", sessionID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve user info"})
+		return
+	}
+
+	// Step 3: Upsert lurus account (create if first login).
+	account, err := h.accounts.UpsertByZitadelSub(c.Request.Context(), userID, loginName, displayName, "")
+	if err != nil {
+		slog.Error("direct-login: upsert account failed", "user_id", userID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to provision account"})
+		return
+	}
+
+	// Step 4: Issue a lurus session token (HS256 JWT, 7-day TTL).
+	const tokenTTL = 7 * 24 * time.Hour
+	token, err := auth.IssueSessionToken(account.ID, tokenTTL, h.sessionSecret)
+	if err != nil {
+		slog.Error("direct-login: token issuance failed", "account_id", account.ID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":      token,
+		"account_id": account.ID,
+	})
+}
+
+// getSessionUser fetches user factors from an existing Zitadel session.
+// Returns (userId, loginName, displayName, error).
+func (h *ZLoginHandler) getSessionUser(ctx context.Context, sessionID string) (string, string, string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("%s/v2/sessions/%s", h.zitadelIssuer, sessionID)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+h.serviceAccountPAT)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", "", fmt.Errorf("call Zitadel Sessions API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if resp.StatusCode != http.StatusOK {
+		return "", "", "", fmt.Errorf("Zitadel Sessions API returned %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		Session struct {
+			Factors struct {
+				User struct {
+					ID          string `json:"id"`
+					LoginName   string `json:"loginName"`
+					DisplayName string `json:"displayName"`
+				} `json:"user"`
+			} `json:"factors"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", "", "", fmt.Errorf("decode response: %w", err)
+	}
+
+	user := result.Session.Factors.User
+	if user.ID == "" {
+		return "", "", "", fmt.Errorf("Zitadel session has no user factor (body: %s)", respBody)
+	}
+	return user.ID, user.LoginName, user.DisplayName, nil
+}
+
 // --- Internal helpers ---
 
 // createSessionByCredentials calls POST /v2/sessions with user loginName + password.

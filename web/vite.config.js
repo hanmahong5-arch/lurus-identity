@@ -17,6 +17,7 @@ export default defineConfig({
       '/api': { target: 'http://localhost:18104', changeOrigin: true },
       '/internal': { target: 'http://localhost:18104', changeOrigin: true },
       '/admin': { target: 'http://localhost:18104', changeOrigin: true },
+      '/proxy': { target: 'http://localhost:18104', changeOrigin: true },
     },
   },
   build: {

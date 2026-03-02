@@ -24,9 +24,11 @@ type Deps struct {
 	AdminOps      *handler.AdminOpsHandler
 	Reports       *handler.ReportHandler
 	AdminConfig   *handler.AdminConfigHandler
-	WechatAuth    *handler.WechatAuthHandler    // nil when WeChat login is not configured
-	Organizations *handler.OrganizationHandler  // organization management
-	InternalKey   string                        // secret for /internal/* bearer auth
+	WechatAuth    *handler.WechatAuthHandler   // nil when WeChat login is not configured
+	WechatOAuth   *handler.WechatOAuthHandler  // nil when WeChat OAuth2 adapter is not configured
+	ZLogin        *handler.ZLoginHandler       // nil when custom OIDC login is not configured
+	Organizations *handler.OrganizationHandler // organization management
+	InternalKey   string                       // secret for /internal/* bearer auth
 	JWT           *auth.JWTMiddleware
 	RateLimit     *ratelimit.Limiter
 }
@@ -48,6 +50,22 @@ func Build(deps Deps) *gin.Engine {
 		r.GET("/api/v1/auth/wechat/callback", deps.WechatAuth.Callback)
 	}
 
+	// Custom OIDC login UI routes — no JWT auth (called by the unauthenticated /zlogin page).
+	if deps.ZLogin != nil {
+		r.GET("/api/v1/auth/info", deps.ZLogin.GetAuthInfo)
+		r.POST("/api/v1/auth/zlogin/password", deps.ZLogin.SubmitPassword)
+		r.POST("/api/v1/auth/wechat/link-oidc", deps.ZLogin.LinkWechatAndComplete)
+	}
+
+	// WeChat OAuth2 adapter — exposes a standard OAuth2 server wrapping WeChat's proprietary flow.
+	// Zitadel registers this as a Generic OAuth IDP; the login-ui auto-shows a WeChat button.
+	if deps.WechatOAuth != nil {
+		r.GET("/oauth/wechat/authorize", deps.WechatOAuth.Authorize)
+		r.GET("/oauth/wechat/callback", deps.WechatOAuth.Callback)
+		r.POST("/oauth/wechat/token", deps.WechatOAuth.Token)
+		r.GET("/oauth/wechat/userinfo", deps.WechatOAuth.UserInfo)
+	}
+
 	// Public QR code endpoint — unauthenticated, read-only.
 	if deps.AdminConfig != nil {
 		r.GET("/api/v1/public/qrcode/:type", deps.AdminConfig.GetPublicQRCode)
@@ -64,6 +82,8 @@ func Build(deps Deps) *gin.Engine {
 		v1.GET("/account/me", deps.Accounts.GetMe)
 		v1.PUT("/account/me", deps.Accounts.UpdateMe)
 		v1.GET("/account/me/services", deps.Accounts.GetServices)
+		v1.GET("/account/me/overview", deps.Accounts.GetMeOverview)
+		v1.GET("/account/me/referral", deps.Accounts.GetMeReferral)
 
 		// Products (read-only, public)
 		v1.GET("/products", deps.Products.ListProducts)
@@ -116,7 +136,11 @@ func Build(deps Deps) *gin.Engine {
 		internal.POST("/accounts/upsert", deps.Internal.UpsertAccount)
 		internal.GET("/accounts/:id/entitlements/:product_id", deps.Internal.GetEntitlements)
 		internal.GET("/accounts/:id/subscription/:product_id", deps.Internal.GetSubscription)
+		internal.GET("/accounts/:id/overview", deps.Internal.GetAccountOverview)
 		internal.POST("/usage/report", deps.Internal.ReportUsage)
+		// Wallet debit/credit for internal service calls (AI quota overage, marketplace revenue)
+		internal.POST("/accounts/:id/wallet/debit", deps.Internal.DebitWallet)
+		internal.POST("/accounts/:id/wallet/credit", deps.Internal.CreditWallet)
 		// Lookup by third-party OAuth binding (e.g. wechat openid)
 		internal.GET("/accounts/by-oauth/:provider/:provider_id", deps.Internal.GetAccountByOAuth)
 		// Resolve org API key to organization (used by lurus-api and other services)

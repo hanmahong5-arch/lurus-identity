@@ -358,3 +358,301 @@ func TestOrgHandler_ResolveAPIKey_InvalidKey(t *testing.T) {
 		t.Errorf("status: want 401, got %d", w.Code)
 	}
 }
+
+// ---------- ListMine ----------
+
+func TestOrgHandler_ListMine_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.GET("/organizations", h.ListMine)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	data, ok := resp["data"].([]any)
+	if !ok || len(data) != 1 {
+		t.Errorf("expected 1 org, got %v", resp["data"])
+	}
+}
+
+func TestOrgHandler_ListMine_Empty(t *testing.T) {
+	h, _ := makeOrgHandler()
+
+	r := testRouter()
+	r.Use(withAccountID(999))
+	r.GET("/organizations", h.ListMine)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+}
+
+// ---------- Get ----------
+
+func TestOrgHandler_Get_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.GET("/organizations/:id", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestOrgHandler_Get_NotFound(t *testing.T) {
+	h, _ := makeOrgHandler()
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.GET("/organizations/:id", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/999", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Org not found → service returns nil → 403 or 404
+	if w.Code != http.StatusForbidden && w.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 403 or 404", w.Code)
+	}
+}
+
+func TestOrgHandler_Get_NotMember(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(99)) // not a member
+	r.GET("/organizations/:id", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", w.Code)
+	}
+}
+
+func TestOrgHandler_Get_InvalidID(t *testing.T) {
+	h, _ := makeOrgHandler()
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.GET("/organizations/:id", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/abc", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", w.Code)
+	}
+}
+
+// ---------- AddMember ----------
+
+func TestOrgHandler_AddMember_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations/:id/members", h.AddMember)
+
+	w := postJSON(r, "/organizations/1/members", map[string]any{
+		"account_id": 2,
+		"role":       "member",
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestOrgHandler_AddMember_MissingBody(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations/:id/members", h.AddMember)
+
+	w := postJSON(r, "/organizations/1/members", map[string]any{})
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", w.Code)
+	}
+}
+
+// ---------- RemoveMember ----------
+
+func TestOrgHandler_RemoveMember_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 2, Role: "member"})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/members/:uid", h.RemoveMember)
+
+	req := httptest.NewRequest(http.MethodDelete, "/organizations/1/members/2", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d, want 204; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- ListAPIKeys ----------
+
+func TestOrgHandler_ListAPIKeys_OK(t *testing.T) {
+	h, _ := makeOrgHandler()
+
+	r := testRouter()
+	r.GET("/organizations/:id/api-keys", h.ListAPIKeys)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/1/api-keys", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+}
+
+// ---------- RevokeAPIKey ----------
+
+func TestOrgHandler_RevokeAPIKey_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+
+	svc := app.NewOrganizationService(store)
+	_, _ = svc.Create(ctx, "RevokeOrg", "revoke-org", 1)
+	_, key, _ := svc.CreateAPIKey(ctx, 1, 1, "to-revoke")
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/api-keys/:kid", h.RevokeAPIKey)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/organizations/1/api-keys/%d", key.ID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d, want 204; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- GetWallet ----------
+
+func TestOrgHandler_GetWallet_OK(t *testing.T) {
+	h, _ := makeOrgHandler()
+
+	r := testRouter()
+	r.GET("/organizations/:id/wallet", h.GetWallet)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/1/wallet", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+}
+
+// ---------- AdminList ----------
+
+func TestOrgHandler_AdminList_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+
+	r := testRouter()
+	r.GET("/admin/organizations", h.AdminList)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/organizations", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+}
+
+// ---------- AdminUpdateStatus ----------
+
+func TestOrgHandler_AdminUpdateStatus_OK(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+
+	r := testRouter()
+	r.PATCH("/admin/organizations/:id", h.AdminUpdateStatus)
+
+	w := patchJSON(r, "/admin/organizations/1", map[string]string{"status": "suspended"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestOrgHandler_AdminUpdateStatus_InvalidStatus(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org1", Slug: "org1", Status: "active", Plan: "free", OwnerAccountID: 1})
+
+	r := testRouter()
+	r.PATCH("/admin/organizations/:id", h.AdminUpdateStatus)
+
+	w := patchJSON(r, "/admin/organizations/1", map[string]string{"status": "invalid"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", w.Code)
+	}
+}
+
+func patchJSON(r http.Handler, path string, body any) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}

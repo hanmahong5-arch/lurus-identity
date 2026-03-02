@@ -14,7 +14,7 @@ func TestAccountHandler_GetMe(t *testing.T) {
 	as := newMockAccountStore()
 	acct := as.seed(entity.Account{ZitadelSub: "sub-1", Email: "me@x.com", DisplayName: "Me"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 	r := testRouter()
 	r.GET("/api/v1/account/me", withAccountID(acct.ID), h.GetMe)
 
@@ -51,7 +51,7 @@ func TestAccountHandler_UpdateMe(t *testing.T) {
 	as := newMockAccountStore()
 	acct := as.seed(entity.Account{ZitadelSub: "sub-u", Email: "u@x.com", DisplayName: "Old"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 
 	tests := []struct {
 		name   string
@@ -83,7 +83,7 @@ func TestAccountHandler_GetServices(t *testing.T) {
 	as := newMockAccountStore()
 	acct := as.seed(entity.Account{ZitadelSub: "sub-s", Email: "s@x.com"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 	r := testRouter()
 	r.GET("/api/v1/account/me/services", withAccountID(acct.ID), h.GetServices)
 
@@ -106,7 +106,7 @@ func TestAccountHandler_AdminListAccounts(t *testing.T) {
 	as.seed(entity.Account{ZitadelSub: "sub-1", Email: "a1@x.com"})
 	as.seed(entity.Account{ZitadelSub: "sub-2", Email: "a2@x.com"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 
 	tests := []struct {
 		name     string
@@ -147,7 +147,7 @@ func TestAccountHandler_AdminGetAccount(t *testing.T) {
 	as := newMockAccountStore()
 	acct := as.seed(entity.Account{ZitadelSub: "sub-admin", Email: "admin@x.com"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 	r := testRouter()
 	r.GET("/admin/v1/accounts/:id", h.AdminGetAccount)
 
@@ -174,11 +174,97 @@ func TestAccountHandler_AdminGetAccount(t *testing.T) {
 	}
 }
 
+func TestAccountHandler_GetMeReferral(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{
+		ZitadelSub:  "sub-ref",
+		Email:       "ref@x.com",
+		DisplayName: "RefUser",
+		AffCode:     "deadbeef",
+	})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
+
+	t.Run("returns_aff_code_and_url", func(t *testing.T) {
+		r := testRouter()
+		r.GET("/api/v1/account/me/referral", withAccountID(acct.ID), h.GetMeReferral)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/referral", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal("invalid JSON response")
+		}
+		if resp["aff_code"] != "deadbeef" {
+			t.Errorf("aff_code = %v, want deadbeef", resp["aff_code"])
+		}
+		if url, ok := resp["referral_url"].(string); !ok || url == "" {
+			t.Error("referral_url missing or empty")
+		}
+		if stats, ok := resp["stats"].(map[string]interface{}); !ok || stats == nil {
+			t.Error("stats field missing")
+		}
+	})
+
+	t.Run("unknown_account_returns_404", func(t *testing.T) {
+		r := testRouter()
+		r.GET("/api/v1/account/me/referral", withAccountID(9999), h.GetMeReferral)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/referral", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestAccountHandler_GetMeOverview(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-ov", Email: "ov@x.com", DisplayName: "OvUser"})
+
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), makeOverviewServiceWithAccounts(as), makeReferralService())
+
+	t.Run("ok", func(t *testing.T) {
+		r := testRouter()
+		r.GET("/api/v1/account/me/overview", withAccountID(acct.ID), h.GetMeOverview)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/overview", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp["topup_url"] == nil {
+			t.Error("response missing topup_url")
+		}
+	})
+
+	t.Run("with_product_id", func(t *testing.T) {
+		r := testRouter()
+		r.GET("/api/v1/account/me/overview", withAccountID(acct.ID), h.GetMeOverview)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/overview?product_id=llm-api", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestAccountHandler_AdminGrantEntitlement(t *testing.T) {
 	as := newMockAccountStore()
 	acct := as.seed(entity.Account{ZitadelSub: "sub-grant", Email: "grant@x.com"})
 
-	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService())
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
 	r := testRouter()
 	r.POST("/admin/v1/accounts/:id/grant", h.AdminGrantEntitlement)
 

@@ -18,18 +18,24 @@ const (
 	codeLength = 4
 )
 
-// Referral reward rates (in Credits = CNY).
+// Referral reward rates (in LB = CNY).
+// Based on target paid CAC ≤ ¥90:
+//   - Pro annual LTV: ¥199×12 = ¥2388; 6-month retention LTV ≈ ¥716
+//   - Max referral cost target: 12% of 6-month LTV = ¥86
+//   - 5+10+30+(199×5%×6) ≈ 104 LB per successful Pro annual referral
 const (
 	RewardSignup            = 5.0
 	RewardFirstTopup        = 10.0
-	RewardFirstSubscription = 20.0
+	RewardFirstSubscription = 30.0 // Raised from 20 — justification above
+	RewardRenewalRate       = 0.05 // 5% royalty on subscription amount for first 6 renewals
 )
 
-// ReferralService processes referral chain reward events and bulk code generation.
+// ReferralService processes referral chain reward events, stats queries, and bulk code generation.
 type ReferralService struct {
-	accounts      accountStore
-	wallets       walletStore
-	redemptions   redemptionCodeStore
+	accounts    accountStore
+	wallets     walletStore
+	redemptions redemptionCodeStore
+	stats       referralStatsStore // optional; nil when not wired
 }
 
 // NewReferralService creates a ReferralService without bulk-code support (legacy path).
@@ -40,6 +46,21 @@ func NewReferralService(accounts accountStore, wallets walletStore) *ReferralSer
 // NewReferralServiceWithCodes creates a ReferralService with bulk-code support.
 func NewReferralServiceWithCodes(accounts accountStore, wallets walletStore, redemptions redemptionCodeStore) *ReferralService {
 	return &ReferralService{accounts: accounts, wallets: wallets, redemptions: redemptions}
+}
+
+// WithStats attaches a stats store to the service and returns it for chaining.
+func (s *ReferralService) WithStats(stats referralStatsStore) *ReferralService {
+	s.stats = stats
+	return s
+}
+
+// GetStats returns aggregated referral statistics for a referrer account.
+// Returns (0, 0, nil) when no stats store is configured.
+func (s *ReferralService) GetStats(ctx context.Context, referrerAccountID int64) (totalReferrals int, totalRewardedLB float64, err error) {
+	if s.stats == nil {
+		return 0, 0, nil
+	}
+	return s.stats.GetReferralStats(ctx, referrerAccountID)
 }
 
 // OnSignup awards a signup bonus to the referrer.
@@ -55,6 +76,19 @@ func (s *ReferralService) OnFirstTopup(ctx context.Context, refereeID, referrerI
 // OnFirstSubscription awards a subscription bonus to the referrer.
 func (s *ReferralService) OnFirstSubscription(ctx context.Context, refereeID, referrerID int64) error {
 	return s.reward(ctx, referrerID, refereeID, entity.ReferralEventFirstSubscription, RewardFirstSubscription)
+}
+
+// OnRenewal awards renewal royalty to the referrer (5% of subscription amount, capped at 6 renewals).
+// renewalCount is the current renewal number (1-indexed). No reward issued after 6 renewals.
+func (s *ReferralService) OnRenewal(ctx context.Context, refereeID, referrerID int64, amountCNY float64, renewalCount int) error {
+	if renewalCount > 6 {
+		return nil // Royalty window exhausted
+	}
+	rewardLB := amountCNY * RewardRenewalRate
+	if rewardLB <= 0 {
+		return nil
+	}
+	return s.reward(ctx, referrerID, refereeID, "renewal_royalty", rewardLB)
 }
 
 // BulkGenerateCodes generates count unique redemption codes in a single batch.

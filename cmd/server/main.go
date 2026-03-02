@@ -135,6 +135,10 @@ func run(ctx context.Context, cfg *config.Config) error {
 
 	// --- Cache ---
 	entCache := cache.NewEntitlementCache(rdb, cfg.CacheEntitlementTTL)
+	ovCache := cache.NewOverviewCache(rdb, 2*time.Minute)
+
+	// --- Repositories (extended) ---
+	referralRepo := repo.NewReferralRepo(db)
 
 	// --- App Services ---
 	vipSvc := app.NewVIPService(vipRepo, walletRepo)
@@ -144,8 +148,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	subSvc := app.NewSubscriptionService(subRepo, productRepo, entSvc, cfg.GracePeriodDays)
 	accountSvc := app.NewAccountService(accountRepo, walletRepo, vipRepo)
 	invoiceSvc := app.NewInvoiceService(invoiceRepo, walletRepo)
-	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo)
+	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo).WithStats(referralRepo)
 	orgSvc := app.NewOrganizationService(orgRepo)
+	overviewSvc := app.NewOverviewService(accountRepo, vipSvc, walletRepo, subSvc, productRepo, ovCache)
 
 	// --- NATS Publisher ---
 	publisher, err := identitynats.NewPublisher(nc)
@@ -194,19 +199,21 @@ func run(ctx context.Context, cfg *config.Config) error {
 	webhookDeduper := idempotency.New(rdb, 24*time.Hour)
 
 	// --- HTTP Handlers ---
-	accountH := handler.NewAccountHandler(accountSvc, vipSvc, subSvc)
+	accountH := handler.NewAccountHandler(accountSvc, vipSvc, subSvc, overviewSvc, referralSvc)
 	subH := handler.NewSubscriptionHandler(subSvc, productSvc, walletSvc, epayProvider, stripeProvider, creemProvider)
 	walletH := handler.NewWalletHandler(walletSvc, epayProvider, stripeProvider, creemProvider)
 	productH := handler.NewProductHandler(productSvc)
-	internalH := handler.NewInternalHandler(accountSvc, subSvc, entSvc, vipSvc)
+	internalH := handler.NewInternalHandler(accountSvc, subSvc, entSvc, vipSvc, overviewSvc, walletSvc, referralSvc)
 	webhookH := handler.NewWebhookHandler(walletSvc, subSvc, epayProvider, stripeProvider, creemProvider, webhookDeduper)
 	invoiceH := handler.NewInvoiceHandler(invoiceSvc)
 	refundH := handler.NewRefundHandler(refundSvc)
 	adminOpsH := handler.NewAdminOpsHandler(referralSvc)
 	reportH := handler.NewReportHandler(db)
 	adminConfigH := handler.NewAdminConfigHandler(adminConfigSvc)
-	wechatAuthH := handler.NewWechatAuthHandler(accountSvc, cfg.WechatServerAddress, cfg.WechatServerToken, cfg.SessionSecret)
-	orgH := handler.NewOrganizationHandler(orgSvc)
+	wechatAuthH  := handler.NewWechatAuthHandler(accountSvc, cfg.WechatServerAddress, cfg.WechatServerToken, cfg.SessionSecret)
+	wechatOAuthH := handler.NewWechatOAuthHandler(cfg.WechatServerAddress, cfg.WechatServerToken, cfg.WechatOAuthClientSecret, rdb)
+	zloginH      := handler.NewZLoginHandler(accountSvc, cfg.ZitadelIssuer, cfg.ZitadelServiceAccountPAT, cfg.SessionSecret)
+	orgH         := handler.NewOrganizationHandler(orgSvc)
 
 	engine := router.Build(router.Deps{
 		Accounts:      accountH,
@@ -221,6 +228,8 @@ func run(ctx context.Context, cfg *config.Config) error {
 		Reports:       reportH,
 		AdminConfig:   adminConfigH,
 		WechatAuth:    wechatAuthH,
+		WechatOAuth:   wechatOAuthH,
+		ZLogin:        zloginH,
 		Organizations: orgH,
 		InternalKey:   cfg.InternalAPIKey,
 		JWT:           jwtMiddleware,

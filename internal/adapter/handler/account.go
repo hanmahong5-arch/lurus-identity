@@ -15,10 +15,18 @@ type AccountHandler struct {
 	accounts *app.AccountService
 	vip      *app.VIPService
 	subs     *app.SubscriptionService
+	overview *app.OverviewService
+	referral *app.ReferralService
 }
 
-func NewAccountHandler(accounts *app.AccountService, vip *app.VIPService, subs *app.SubscriptionService) *AccountHandler {
-	return &AccountHandler{accounts: accounts, vip: vip, subs: subs}
+func NewAccountHandler(
+	accounts *app.AccountService,
+	vip *app.VIPService,
+	subs *app.SubscriptionService,
+	overview *app.OverviewService,
+	referral *app.ReferralService,
+) *AccountHandler {
+	return &AccountHandler{accounts: accounts, vip: vip, subs: subs, overview: overview, referral: referral}
 }
 
 // GetMe returns the authenticated user's account summary.
@@ -160,6 +168,46 @@ func (h *AccountHandler) AdminGrantEntitlement(c *gin.Context) {
 	}
 	_ = e // passed to EntitlementService in production wiring
 	c.JSON(http.StatusOK, gin.H{"granted": true})
+}
+
+// GetMeReferral returns the authenticated user's referral code and stats.
+// GET /api/v1/account/me/referral
+func (h *AccountHandler) GetMeReferral(c *gin.Context) {
+	accountID := mustAccountID(c)
+	a, err := h.accounts.GetByID(c.Request.Context(), accountID)
+	if err != nil || a == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+
+	totalReferrals, totalRewardedLB, err := h.referral.GetStats(c.Request.Context(), accountID)
+	if err != nil {
+		// Non-fatal: return zero stats rather than failing the request.
+		totalReferrals, totalRewardedLB = 0, 0
+	}
+
+	const baseURL = "https://lurus.cn/r/"
+	c.JSON(http.StatusOK, gin.H{
+		"aff_code":     a.AffCode,
+		"referral_url": baseURL + a.AffCode,
+		"stats": gin.H{
+			"total_referrals":   totalReferrals,
+			"total_rewarded_lb": totalRewardedLB,
+		},
+	})
+}
+
+// GetMeOverview returns the authenticated user's aggregated account overview.
+// GET /api/v1/account/me/overview?product_id=<pid>
+func (h *AccountHandler) GetMeOverview(c *gin.Context) {
+	accountID := mustAccountID(c)
+	productID := c.Query("product_id")
+	ov, err := h.overview.Get(c.Request.Context(), accountID, productID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get overview"})
+		return
+	}
+	c.JSON(http.StatusOK, ov)
 }
 
 // mustAccountID reads the account_id set by auth middleware.

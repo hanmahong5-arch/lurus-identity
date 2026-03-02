@@ -106,6 +106,18 @@ func (m *mockAccountStore) GetByLurusID(_ context.Context, lurusID string) (*ent
 	return nil, nil
 }
 
+func (m *mockAccountStore) GetByAffCode(_ context.Context, code string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if a.AffCode == code {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockAccountStore) List(_ context.Context, _ string, _, _ int) ([]*entity.Account, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

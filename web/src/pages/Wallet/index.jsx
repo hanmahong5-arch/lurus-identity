@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Typography, Button, Table, Tag, Select, Toast } from '@douyinfe/semi-ui'
+import { Card, Typography, Button, Table, Tag, Select, Toast, Progress } from '@douyinfe/semi-ui'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../../store'
 import { listTransactions } from '../../api/wallet'
@@ -49,6 +49,72 @@ const columns = [
 const TYPE_OPTIONS = Object.entries(TX_TYPE_MAP).map(([value, { label }]) => ({
   label, value,
 }))
+
+// Holder tier thresholds and display info.
+const HOLDER_TIERS = [
+  { tier: 'diamond', label: '钻石持有者', minLB: 2000, color: '#722ed1', emoji: '💎', discount: '8.5折' },
+  { tier: 'gold',    label: '黄金持有者', minLB: 500,  color: '#faad14', emoji: '🥇', discount: '9折'   },
+  { tier: 'silver',  label: '白银持有者', minLB: 100,  color: '#8c8c8c', emoji: '🥈', discount: '9.5折' },
+]
+
+const NEXT_TIER = {
+  silver:  { tier: 'gold',    label: '黄金', minLB: 500  },
+  gold:    { tier: 'diamond', label: '钻石', minLB: 2000 },
+  diamond: null,
+}
+
+// HolderTierCard displays the user's LB holder tier and the next upgrade progress.
+function HolderTierCard({ wallet, onTopup }) {
+  if (!wallet) return null
+
+  const balance = wallet.balance ?? 0
+  const current = HOLDER_TIERS.find((t) => balance >= t.minLB) ?? null
+  const nextTier = current ? NEXT_TIER[current.tier] : { tier: 'silver', label: '白银', minLB: 100 }
+
+  const tierLabel = current?.label ?? '普通用户'
+  const tierColor = current?.color ?? '#1677ff'
+  const tierEmoji = current?.emoji ?? '🔵'
+  const discount  = current?.discount ?? '无折扣'
+
+  return (
+    <Card shadows="always" style={{ marginBottom: 24, borderLeft: `4px solid ${tierColor}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 22 }}>{tierEmoji}</span>
+            <span style={{ fontWeight: 700, fontSize: 16, color: tierColor }}>{tierLabel}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+            <div>
+              <Text type="secondary" size="small">当前余额</Text>
+              <div style={{ fontWeight: 600 }}>{balance.toFixed(2)} LB</div>
+            </div>
+            <div>
+              <Text type="secondary" size="small">购买折扣</Text>
+              <div style={{ fontWeight: 600, color: tierColor }}>{discount}</div>
+            </div>
+          </div>
+        </div>
+
+        {nextTier && (
+          <div style={{ minWidth: 200, flex: 1 }}>
+            <Text type="secondary" size="small" style={{ display: 'block', marginBottom: 6 }}>
+              距 {nextTier.label} 还差 {Math.max(0, nextTier.minLB - balance).toFixed(2)} LB
+            </Text>
+            <Progress
+              percent={Math.min(100, Math.round((balance / nextTier.minLB) * 100))}
+              strokeColor={tierColor}
+              size="small"
+              showInfo={false}
+            />
+          </div>
+        )}
+
+        <Button type="primary" onClick={onTopup}>去充值升级</Button>
+      </div>
+    </Card>
+  )
+}
 
 // UserCard shows the LurusID and linked login methods at the top of the wallet page.
 function UserCard({ account }) {
@@ -138,6 +204,7 @@ export default function WalletPage() {
     <div>
       <Title heading={3} style={{ marginBottom: 24 }}>我的钱包</Title>
       <UserCard account={account} />
+      <HolderTierCard wallet={wallet} onTopup={() => navigate('/topup')} />
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <Card style={{ flex: 1 }} shadows="always">

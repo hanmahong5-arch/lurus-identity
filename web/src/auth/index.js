@@ -64,8 +64,11 @@ export async function login() {
   }
   const { verifier, challenge } = await generatePKCE()
   sessionStorage.setItem('pkce_verifier', verifier)
-  // Remember where to send the user after login (default: /wallet)
-  sessionStorage.setItem('login_return', window.location.pathname === '/callback' ? '/wallet' : window.location.pathname)
+  // Remember where to send the user after login (default: /wallet).
+  // Exclude auth-flow pages to prevent redirect loops.
+  const AUTH_PAGES = ['/login', '/callback', '/zlogin']
+  const currentPath = window.location.pathname
+  sessionStorage.setItem('login_return', AUTH_PAGES.includes(currentPath) ? '/wallet' : currentPath)
 
   const params = new URLSearchParams({
     client_id:             CLIENT_ID,

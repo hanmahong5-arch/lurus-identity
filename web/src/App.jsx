@@ -8,6 +8,8 @@ import RedeemPage from './pages/Redeem'
 import AdminPage from './pages/Admin'
 import CallbackPage from './pages/Callback'
 import LoginPage from './pages/Login'
+import ZLoginPage from './pages/ZLogin'
+import HubPage from './pages/Hub'
 import { useStore } from './store'
 
 export default function App() {
@@ -23,9 +25,12 @@ export default function App() {
         {/* Auth pages — outside Layout, no auth required */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/callback" element={<CallbackPage />} />
+        {/* Custom Zitadel OIDC login UI — no auth, no layout wrapper */}
+        <Route path="/zlogin" element={<ZLoginPage />} />
 
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/wallet" replace />} />
+          <Route index element={<Navigate to="/hub" replace />} />
+          <Route path="hub" element={<HubPage />} />
           <Route path="wallet" element={<WalletPage />} />
           <Route path="topup" element={<TopupPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />

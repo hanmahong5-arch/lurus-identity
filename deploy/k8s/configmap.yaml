@@ -21,3 +21,4 @@ data:
   EPAY_RETURN_URL: "https://id.lurus.cn/topup/result"
   STRIPE_RETURN_URL: "https://id.lurus.cn/topup/result"
   CREEM_RETURN_URL: "https://id.lurus.cn/topup/result"
+  # ZLogin: set ZITADEL_SERVICE_ACCOUNT_PAT in secrets.yaml (not here — it's a secret)

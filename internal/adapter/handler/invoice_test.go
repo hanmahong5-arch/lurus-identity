@@ -6,7 +6,71 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/app"
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
+
+func makeInvoiceServiceWithPaidOrder(accountID int64, orderNo string) *app.InvoiceService {
+	ws := newMockWalletStore()
+	ws.orders[orderNo] = &entity.PaymentOrder{
+		OrderNo:       orderNo,
+		AccountID:     accountID,
+		Status:        entity.OrderStatusPaid,
+		AmountCNY:     99.0,
+		ProductID:     "lurus_api",
+		PaymentMethod: "wallet",
+	}
+	return app.NewInvoiceService(&mockInvoiceStore{}, ws)
+}
+
+func TestInvoiceHandler_GenerateInvoice_Success(t *testing.T) {
+	h := NewInvoiceHandler(makeInvoiceServiceWithPaidOrder(1, "ORD-001"))
+	r := testRouter()
+	r.POST("/api/v1/invoices", withAccountID(1), h.GenerateInvoice)
+
+	body, _ := json.Marshal(map[string]string{"order_no": "ORD-001"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invoices", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["invoice_no"] == nil {
+		t.Error("response missing invoice_no")
+	}
+}
+
+func TestInvoiceHandler_GenerateInvoice_OrderNotFound(t *testing.T) {
+	h := NewInvoiceHandler(makeInvoiceService())
+	r := testRouter()
+	r.POST("/api/v1/invoices", withAccountID(1), h.GenerateInvoice)
+
+	body, _ := json.Marshal(map[string]string{"order_no": "ORD-NONEXISTENT"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invoices", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestInvoiceHandler_AdminList_InvalidAccountID(t *testing.T) {
+	h := NewInvoiceHandler(makeInvoiceService())
+	r := testRouter()
+	r.GET("/admin/v1/invoices", h.AdminList)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/v1/invoices?account_id=abc", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
 
 func TestInvoiceHandler_GenerateInvoice_MissingOrderNo(t *testing.T) {
 	h := NewInvoiceHandler(makeInvoiceService())

@@ -15,6 +15,7 @@ type accountStore interface {
 	GetByEmail(ctx context.Context, email string) (*entity.Account, error)
 	GetByZitadelSub(ctx context.Context, sub string) (*entity.Account, error)
 	GetByLurusID(ctx context.Context, lurusID string) (*entity.Account, error)
+	GetByAffCode(ctx context.Context, code string) (*entity.Account, error)
 	List(ctx context.Context, keyword string, page, pageSize int) ([]*entity.Account, int64, error)
 	UpsertOAuthBinding(ctx context.Context, b *entity.OAuthBinding) error
 	// GetByOAuthBinding looks up an account via its OAuth provider binding.
@@ -103,6 +104,19 @@ type refundStore interface {
 	UpdateStatus(ctx context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error
 	MarkCompleted(ctx context.Context, refundNo string, completedAt time.Time) error
 	ListByAccount(ctx context.Context, accountID int64, page, pageSize int) ([]entity.Refund, int64, error)
+}
+
+// overviewCache is the minimal cache interface required by OverviewService.
+// Stores and retrieves serialized AccountOverview JSON bytes to avoid cross-package imports.
+type overviewCache interface {
+	Get(ctx context.Context, accountID int64, productID string) ([]byte, error)
+	Set(ctx context.Context, accountID int64, productID string, data []byte) error
+	Invalidate(ctx context.Context, accountID int64, productID string) error
+}
+
+// referralStatsStore supports querying aggregated referral reward statistics.
+type referralStatsStore interface {
+	GetReferralStats(ctx context.Context, referrerAccountID int64) (totalReferrals int, totalRewardedLB float64, err error)
 }
 
 // orgStore is the minimal DB interface required by OrganizationService.

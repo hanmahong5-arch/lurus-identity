@@ -14,6 +14,9 @@ type InternalHandler struct {
 	subs         *app.SubscriptionService
 	entitlements *app.EntitlementService
 	vip          *app.VIPService
+	overview     *app.OverviewService
+	wallet       *app.WalletService
+	referral     *app.ReferralService
 }
 
 func NewInternalHandler(
@@ -21,8 +24,19 @@ func NewInternalHandler(
 	subs *app.SubscriptionService,
 	ents *app.EntitlementService,
 	vip *app.VIPService,
+	overview *app.OverviewService,
+	wallet *app.WalletService,
+	referral *app.ReferralService,
 ) *InternalHandler {
-	return &InternalHandler{accounts: accounts, subs: subs, entitlements: ents, vip: vip}
+	return &InternalHandler{
+		accounts:     accounts,
+		subs:         subs,
+		entitlements: ents,
+		vip:          vip,
+		overview:     overview,
+		wallet:       wallet,
+		referral:     referral,
+	}
 }
 
 // GetAccountByZitadelSub looks up an account by Zitadel OIDC sub.
@@ -42,23 +56,40 @@ func (h *InternalHandler) GetAccountByZitadelSub(c *gin.Context) {
 }
 
 // UpsertAccount creates or updates an account from a Zitadel webhook payload.
+// Supports optional referrer_aff_code to link the account to a referrer on first creation.
 // POST /internal/v1/accounts/upsert
 func (h *InternalHandler) UpsertAccount(c *gin.Context) {
 	var req struct {
-		ZitadelSub  string `json:"zitadel_sub"  binding:"required"`
-		Email       string `json:"email"        binding:"required"`
-		DisplayName string `json:"display_name"`
-		AvatarURL   string `json:"avatar_url"`
+		ZitadelSub      string `json:"zitadel_sub"       binding:"required"`
+		Email           string `json:"email"             binding:"required"`
+		DisplayName     string `json:"display_name"`
+		AvatarURL       string `json:"avatar_url"`
+		ReferrerAffCode string `json:"referrer_aff_code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	a, err := h.accounts.UpsertByZitadelSub(c.Request.Context(), req.ZitadelSub, req.Email, req.DisplayName, req.AvatarURL)
+	ctx := c.Request.Context()
+	a, err := h.accounts.UpsertByZitadelSub(ctx, req.ZitadelSub, req.Email, req.DisplayName, req.AvatarURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Link referrer on first account creation (aff_code lookup).
+	if req.ReferrerAffCode != "" && a.ReferrerID == nil {
+		referrer, rerr := h.accounts.GetByAffCode(ctx, req.ReferrerAffCode)
+		if rerr == nil && referrer != nil && referrer.ID != a.ID {
+			referrerID := referrer.ID
+			a.ReferrerID = &referrerID
+			if uerr := h.accounts.Update(ctx, a); uerr == nil {
+				// Fire signup reward — non-critical, ignore error.
+				_ = h.referral.OnSignup(ctx, a.ID, referrer.ID)
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, a)
 }
 
@@ -120,6 +151,23 @@ func (h *InternalHandler) GetAccountByOAuth(c *gin.Context) {
 	c.JSON(http.StatusOK, a)
 }
 
+// GetAccountOverview returns the aggregated overview for a given account ID.
+// GET /internal/v1/accounts/:id/overview?product_id=<pid>
+func (h *InternalHandler) GetAccountOverview(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account id"})
+		return
+	}
+	productID := c.Query("product_id")
+	ov, err := h.overview.Get(c.Request.Context(), id, productID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get overview"})
+		return
+	}
+	c.JSON(http.StatusOK, ov)
+}
+
 // ReportUsage receives LLM usage reports from lurus-api for VIP accumulation.
 // POST /internal/v1/usage/report
 func (h *InternalHandler) ReportUsage(c *gin.Context) {
@@ -133,4 +181,57 @@ func (h *InternalHandler) ReportUsage(c *gin.Context) {
 	}
 	_ = h.vip.RecalculateFromWallet(c.Request.Context(), req.AccountID)
 	c.JSON(http.StatusOK, gin.H{"accepted": true})
+}
+
+// DebitWallet deducts LB from an account wallet (e.g. AI quota overage).
+// POST /internal/v1/accounts/:id/wallet/debit
+func (h *InternalHandler) DebitWallet(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account id"})
+		return
+	}
+	var req struct {
+		Amount      float64 `json:"amount"      binding:"required,gt=0"`
+		Type        string  `json:"type"        binding:"required"`
+		ProductID   string  `json:"product_id"`
+		Description string  `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	tx, err := h.wallet.Debit(c.Request.Context(), id, req.Amount, req.Type, req.Description, req.ProductID, "internal_debit", "")
+	if err != nil {
+		// Insufficient balance returns a structured error
+		c.JSON(http.StatusBadRequest, gin.H{"error": "insufficient_balance"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "balance_after": tx.BalanceAfter})
+}
+
+// CreditWallet adds LB to an account wallet (e.g. marketplace author revenue).
+// POST /internal/v1/accounts/:id/wallet/credit
+func (h *InternalHandler) CreditWallet(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account id"})
+		return
+	}
+	var req struct {
+		Amount      float64 `json:"amount"      binding:"required,gt=0"`
+		Type        string  `json:"type"        binding:"required"`
+		ProductID   string  `json:"product_id"`
+		Description string  `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	tx, err := h.wallet.Credit(c.Request.Context(), id, req.Amount, req.Type, req.Description, "internal_credit", "", req.ProductID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "credit failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "balance_after": tx.BalanceAfter})
 }

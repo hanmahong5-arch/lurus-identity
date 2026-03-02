@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -14,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // testRSAKey generates a small RSA key suitable for unit tests only.
@@ -284,4 +288,182 @@ func TestParseAudience_Array(t *testing.T) {
 	if fmt.Sprintf("%v", aud) != "[app1 app2]" {
 		t.Errorf("unexpected aud: %v", aud)
 	}
+}
+
+// ---------- parseECKey ----------
+
+func TestParseECKey_P256(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	jwk := jwkKey{
+		Kty: "EC",
+		Crv: "P-256",
+		X:   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
+		Y:   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+	}
+	pub, err := parseECKey(jwk)
+	if err != nil {
+		t.Fatalf("parseECKey: %v", err)
+	}
+	if pub.Curve != elliptic.P256() {
+		t.Error("expected P-256 curve")
+	}
+}
+
+func TestParseECKey_P384(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	jwk := jwkKey{
+		Kty: "EC",
+		Crv: "P-384",
+		X:   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
+		Y:   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+	}
+	pub, err := parseECKey(jwk)
+	if err != nil {
+		t.Fatalf("parseECKey: %v", err)
+	}
+	if pub.Curve != elliptic.P384() {
+		t.Error("expected P-384 curve")
+	}
+}
+
+func TestParseECKey_UnsupportedCurve(t *testing.T) {
+	jwk := jwkKey{Kty: "EC", Crv: "P-999", X: "AAAA", Y: "BBBB"}
+	_, err := parseECKey(jwk)
+	if err == nil {
+		t.Fatal("expected error for unsupported curve")
+	}
+	if !strings.Contains(err.Error(), "unsupported EC curve") {
+		t.Errorf("error=%v, want 'unsupported EC curve'", err)
+	}
+}
+
+func TestParseECKey_MissingXY(t *testing.T) {
+	_, err := parseECKey(jwkKey{Kty: "EC", Crv: "P-256", X: "", Y: ""})
+	if err == nil {
+		t.Fatal("expected error for missing x/y")
+	}
+}
+
+// ---------- verifyEC ----------
+
+func TestVerifyEC_Valid(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	msg := []byte("header.payload")
+	h := crypto.SHA256.New()
+	h.Write(msg)
+	digest := h.Sum(nil)
+
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	// Build raw r||s signature
+	byteLen := (key.Params().BitSize + 7) / 8
+	sig := make([]byte, 2*byteLen)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[byteLen-len(rBytes):byteLen], rBytes)
+	copy(sig[2*byteLen-len(sBytes):], sBytes)
+
+	if err := verifyEC(&key.PublicKey, msg, sig, crypto.SHA256.New); err != nil {
+		t.Fatalf("verifyEC: %v", err)
+	}
+}
+
+func TestVerifyEC_Invalid(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	msg := []byte("header.payload")
+	sig := make([]byte, 64) // all zeros → invalid
+
+	err := verifyEC(&key.PublicKey, msg, sig, crypto.SHA256.New)
+	if err == nil {
+		t.Fatal("expected error for invalid signature")
+	}
+}
+
+func TestVerifyEC_WrongKeyType(t *testing.T) {
+	rsaKey := generateTestRSAKey(t)
+	err := verifyEC(&rsaKey.PublicKey, []byte("data"), make([]byte, 64), crypto.SHA256.New)
+	if err == nil {
+		t.Fatal("expected error for wrong key type")
+	}
+	if !strings.Contains(err.Error(), "key type mismatch") {
+		t.Errorf("error=%v, want 'key type mismatch'", err)
+	}
+}
+
+func TestVerifyEC_OddLength(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	err := verifyEC(&key.PublicKey, []byte("data"), make([]byte, 63), crypto.SHA256.New)
+	if err == nil {
+		t.Fatal("expected error for odd-length signature")
+	}
+}
+
+// ---------- hashNameToCryptoHash ----------
+
+func TestHashNameToCryptoHash(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    crypto.Hash
+		wantErr bool
+	}{
+		{"sha256", crypto.SHA256, false},
+		{"sha384", crypto.SHA384, false},
+		{"sha512", crypto.SHA512, false},
+		{"md5", 0, true},
+		{"", 0, true},
+	}
+	for _, tc := range tests {
+		got, err := hashNameToCryptoHash(tc.name)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("hashNameToCryptoHash(%q) err=%v, wantErr=%v", tc.name, err, tc.wantErr)
+		}
+		if !tc.wantErr && got != tc.want {
+			t.Errorf("hashNameToCryptoHash(%q)=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// ---------- GetClaims ----------
+
+func TestGetClaims_AfterAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/test", func(c *gin.Context) {
+		c.Set(ContextKeyClaims, &Claims{Sub: "u-1", Email: "a@b.com"})
+		claims := GetClaims(c)
+		if claims == nil || claims.Sub != "u-1" {
+			t.Errorf("GetClaims=%v, want sub=u-1", claims)
+		}
+		c.String(http.StatusOK, "ok")
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	r.ServeHTTP(w, req)
+}
+
+func TestGetClaims_NoAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/test", func(c *gin.Context) {
+		claims := GetClaims(c)
+		if claims != nil {
+			t.Errorf("GetClaims=%v, want nil", claims)
+		}
+		c.String(http.StatusOK, "ok")
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	r.ServeHTTP(w, req)
 }

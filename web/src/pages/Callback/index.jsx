@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Spin, Typography } from '@douyinfe/semi-ui'
 import { handleCallback, storeLurusToken } from '../../auth'
+import { linkWechatAndComplete } from '../../api/zlogin'
+
+// Session storage key set by ZLogin when the user triggers WeChat auth within an OIDC flow.
+const OIDC_REQ_KEY = 'zlogin_oidc_req'
 
 const { Text } = Typography
 
@@ -16,6 +20,21 @@ export default function CallbackPage() {
     const lurusToken = params.get('lurus_token')
     if (lurusToken) {
       storeLurusToken(lurusToken)
+
+      // Check if this WeChat login was triggered from a Zitadel OIDC flow (/zlogin).
+      const pendingOIDC = sessionStorage.getItem(OIDC_REQ_KEY)
+      if (pendingOIDC) {
+        sessionStorage.removeItem(OIDC_REQ_KEY)
+        linkWechatAndComplete(pendingOIDC, lurusToken)
+          .then(({ callback_url }) => {
+            window.location.href = callback_url
+          })
+          .catch((err) => {
+            setError('微信 OIDC 关联失败：' + err.message)
+          })
+        return
+      }
+
       const returnTo = sessionStorage.getItem('login_return') || '/wallet'
       sessionStorage.removeItem('login_return')
       navigate(returnTo, { replace: true })

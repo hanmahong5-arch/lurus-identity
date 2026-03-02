@@ -81,6 +81,18 @@ func (m *mockAccountStore) GetByLurusID(_ context.Context, _ string) (*entity.Ac
 	return nil, nil
 }
 
+func (m *mockAccountStore) GetByAffCode(_ context.Context, code string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if a.AffCode == code {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockAccountStore) List(_ context.Context, _ string, _, _ int) ([]*entity.Account, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -149,7 +161,7 @@ func (m *mockWalletStore) Credit(_ context.Context, accountID int64, amount floa
 		m.byAcct[accountID] = w
 	}
 	w.Balance += amount
-	return &entity.WalletTransaction{Amount: amount, Type: txType}, nil
+	return &entity.WalletTransaction{Amount: amount, Type: txType, BalanceAfter: w.Balance}, nil
 }
 
 func (m *mockWalletStore) Debit(_ context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
@@ -164,7 +176,7 @@ func (m *mockWalletStore) Debit(_ context.Context, accountID int64, amount float
 		return nil, fmt.Errorf("insufficient balance: have %.4f, need %.4f", w.Balance, amount)
 	}
 	w.Balance -= amount
-	return &entity.WalletTransaction{Amount: -amount, Type: txType}, nil
+	return &entity.WalletTransaction{Amount: -amount, Type: txType, BalanceAfter: w.Balance}, nil
 }
 
 func (m *mockWalletStore) ListTransactions(_ context.Context, _ int64, _, _ int) ([]entity.WalletTransaction, int64, error) {
@@ -452,6 +464,44 @@ func makeRefundService() *app.RefundService {
 
 func makeReferralService() *app.ReferralService {
 	return app.NewReferralServiceWithCodes(newMockAccountStore(), newMockWalletStore(), &mockRedemptionCodeStore{})
+}
+
+// ---------- mock overview cache ----------
+
+type mockOverviewCacheH struct{}
+
+func (m *mockOverviewCacheH) Get(_ context.Context, _ int64, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockOverviewCacheH) Set(_ context.Context, _ int64, _ string, _ []byte) error {
+	return nil
+}
+func (m *mockOverviewCacheH) Invalidate(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
+// ---------- overview service builder ----------
+
+func makeOverviewServiceH() *app.OverviewService {
+	return app.NewOverviewService(
+		newMockAccountStore(),
+		makeVIPService(),
+		newMockWalletStore(),
+		makeSubService(),
+		newMockPlanStore(),
+		&mockOverviewCacheH{},
+	)
+}
+
+func makeOverviewServiceWithAccounts(as *mockAccountStore) *app.OverviewService {
+	return app.NewOverviewService(
+		as,
+		makeVIPService(),
+		newMockWalletStore(),
+		makeSubService(),
+		newMockPlanStore(),
+		&mockOverviewCacheH{},
+	)
 }
 
 // ---------- test router helper ----------

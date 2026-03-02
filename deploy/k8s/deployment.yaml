@@ -126,6 +126,36 @@ spec:
                   name: lurus-identity-secrets
                   key: CREEM_WEBHOOK_SECRET
                   optional: true
+            - name: WECHAT_SERVER_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: WECHAT_SERVER_ADDRESS
+                  optional: true
+            - name: WECHAT_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: WECHAT_SERVER_TOKEN
+                  optional: true
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SESSION_SECRET
+                  optional: true
+            - name: ZITADEL_SERVICE_ACCOUNT_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: ZITADEL_SERVICE_ACCOUNT_PAT
+                  optional: true
+            - name: WECHAT_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: WECHAT_OAUTH_CLIENT_SECRET
+                  optional: true
           resources:
             requests:
               memory: "128Mi"

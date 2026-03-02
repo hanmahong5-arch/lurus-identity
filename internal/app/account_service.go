@@ -183,6 +183,11 @@ func (s *AccountService) GetByOAuthBinding(ctx context.Context, provider, provid
 	return s.accounts.GetByOAuthBinding(ctx, provider, providerID)
 }
 
+// GetByAffCode looks up an account by its referral affiliate code.
+func (s *AccountService) GetByAffCode(ctx context.Context, code string) (*entity.Account, error) {
+	return s.accounts.GetByAffCode(ctx, code)
+}
+
 // generateAffCode produces a random 8-character hex referral code.
 func generateAffCode() (string, error) {
 	b := make([]byte, 4)

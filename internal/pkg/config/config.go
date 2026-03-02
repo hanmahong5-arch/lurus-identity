@@ -65,6 +65,14 @@ type Config struct {
 	WechatServerAddress string // WECHAT_SERVER_ADDRESS (base URL of wechat proxy)
 	WechatServerToken   string // WECHAT_SERVER_TOKEN (bearer token for proxy)
 
+	// Custom Zitadel login UI (ZLogin)
+	// Requires a Zitadel service account or PAT with session creation rights.
+	ZitadelServiceAccountPAT string // ZITADEL_SERVICE_ACCOUNT_PAT
+
+	// WeChat OAuth2 adapter — allows Zitadel to use WeChat as a Generic OAuth IDP.
+	// Set to the same value as Zitadel IDP config → Client Secret.
+	WechatOAuthClientSecret string // WECHAT_OAUTH_CLIENT_SECRET
+
 	// Session token (lurus-issued HS256 JWT for WeChat login)
 	SessionSecret string // SESSION_SECRET (min 32 bytes recommended)
 
@@ -107,9 +115,11 @@ func Load() (*Config, error) {
 		CreemAPIKey:         getEnv("CREEM_API_KEY", ""),
 		CreemWebhookSecret:  getEnv("CREEM_WEBHOOK_SECRET", ""),
 		CreemReturnURL:      getEnv("CREEM_RETURN_URL", ""),
-		WechatServerAddress: getEnv("WECHAT_SERVER_ADDRESS", ""),
-		WechatServerToken:   getEnv("WECHAT_SERVER_TOKEN", ""),
-		SessionSecret:       getEnv("SESSION_SECRET", ""),
+		WechatServerAddress:      getEnv("WECHAT_SERVER_ADDRESS", ""),
+		WechatServerToken:        getEnv("WECHAT_SERVER_TOKEN", ""),
+		SessionSecret:            getEnv("SESSION_SECRET", ""),
+		ZitadelServiceAccountPAT: getEnv("ZITADEL_SERVICE_ACCOUNT_PAT", ""),
+		WechatOAuthClientSecret:  getEnv("WECHAT_OAUTH_CLIENT_SECRET", ""),
 		EmailSMTPHost:       getEnv("EMAIL_SMTP_HOST", ""),
 		EmailSMTPPort:       parseInt("EMAIL_SMTP_PORT", 587),
 		EmailSMTPUser:       getEnv("EMAIL_SMTP_USER", ""),

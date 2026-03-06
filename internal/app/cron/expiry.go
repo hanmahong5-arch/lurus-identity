@@ -12,6 +12,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// outboxWriter is the subset of the outbox repository needed by event publishers.
+type outboxWriter interface {
+	Insert(ctx context.Context, ev *event.IdentityEvent) error
+}
+
 const (
 	// publishEventTimeout is the deadline for a single best-effort event publish.
 	// An independent context is used so a cancelled run-ctx does not abort in-flight
@@ -40,15 +45,17 @@ type ExpiryJob struct {
 	publisher EventPublisher
 	rdb       *redis.Client
 	interval  time.Duration
+	outbox    outboxWriter
 }
 
 // NewExpiryJob creates a new ExpiryJob.
-func NewExpiryJob(subs *app.SubscriptionService, publisher EventPublisher, rdb *redis.Client) *ExpiryJob {
+func NewExpiryJob(subs *app.SubscriptionService, publisher EventPublisher, rdb *redis.Client, outbox outboxWriter) *ExpiryJob {
 	return &ExpiryJob{
 		subs:      subs,
 		publisher: publisher,
 		rdb:       rdb,
 		interval:  defaultInterval,
+		outbox:    outbox,
 	}
 }
 
@@ -139,21 +146,29 @@ func (j *ExpiryJob) runExpiry(ctx context.Context) (scanned, processed, failed i
 	return
 }
 
-// publishEvent is a best-effort event publisher; failures are logged but not fatal.
-// It always uses its own short-lived context so that cancellation of the parent
-// run context (e.g. pod shutdown) does not abort delivery of events whose
-// corresponding DB state has already been committed.
-func (j *ExpiryJob) publishEvent(_ context.Context, subject string, accountID int64, lurusID, productID string, payload any) {
-	if j.publisher == nil {
-		return
-	}
+// publishEvent writes the event to the transactional outbox for reliable delivery.
+// If the outbox is unavailable, it falls back to direct NATS publish (best-effort).
+func (j *ExpiryJob) publishEvent(ctx context.Context, subject string, accountID int64, lurusID, productID string, payload any) {
 	ev, err := event.NewEvent(subject, accountID, lurusID, productID, payload)
 	if err != nil {
 		slog.Error("cron/expiry: build event", "err", err)
 		return
 	}
-	// Use an independent context with a fixed timeout rather than the caller's ctx,
-	// which may already be cancelled during graceful shutdown.
+
+	// Primary path: write to outbox (relay will publish to NATS).
+	if j.outbox != nil {
+		if err := j.outbox.Insert(ctx, ev); err != nil {
+			slog.Error("cron/expiry: outbox insert failed, falling back to direct publish",
+				"subject", subject, "err", err)
+		} else {
+			return
+		}
+	}
+
+	// Fallback: direct NATS publish (best-effort).
+	if j.publisher == nil {
+		return
+	}
 	pubCtx, cancel := context.WithTimeout(context.Background(), publishEventTimeout)
 	defer cancel()
 	if err := j.publisher.Publish(pubCtx, ev); err != nil {

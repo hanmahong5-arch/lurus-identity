@@ -250,7 +250,7 @@ func TestRefundService_publishRefundCompleted_WithPublisher(t *testing.T) {
 	ws := newMockWalletStore()
 	rs := newMockRefundStore()
 	pub := &mockPublisher{}
-	svc := NewRefundService(rs, ws, pub)
+	svc := NewRefundService(rs, ws, pub, nil)
 
 	const accountID = int64(300)
 	seedPaidOrderForRefund(ws, accountID, "LO_PUB_TEST")
@@ -268,7 +268,7 @@ func TestRefundService_publishRefundCompleted_PublisherError(t *testing.T) {
 	ws := newMockWalletStore()
 	rs := newMockRefundStore()
 	pub := &mockPublisher{err: errors.New("nats unavailable")}
-	svc := NewRefundService(rs, ws, pub)
+	svc := NewRefundService(rs, ws, pub, nil)
 
 	const accountID = int64(301)
 	seedPaidOrderForRefund(ws, accountID, "LO_PUB_ERR")

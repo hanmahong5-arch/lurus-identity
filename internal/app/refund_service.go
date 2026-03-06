@@ -23,16 +23,22 @@ type RefundPublisher interface {
 	Publish(ctx context.Context, ev *event.IdentityEvent) error
 }
 
+// refundOutboxWriter is the subset of the outbox repository needed by RefundService.
+type refundOutboxWriter interface {
+	Insert(ctx context.Context, ev *event.IdentityEvent) error
+}
+
 // RefundService orchestrates the refund request and approval workflow.
 type RefundService struct {
 	refunds   refundStore
 	wallets   walletStore
 	publisher RefundPublisher
+	outbox    refundOutboxWriter
 }
 
 // NewRefundService creates a new RefundService.
-func NewRefundService(refunds refundStore, wallets walletStore, publisher RefundPublisher) *RefundService {
-	return &RefundService{refunds: refunds, wallets: wallets, publisher: publisher}
+func NewRefundService(refunds refundStore, wallets walletStore, publisher RefundPublisher, outbox refundOutboxWriter) *RefundService {
+	return &RefundService{refunds: refunds, wallets: wallets, publisher: publisher, outbox: outbox}
 }
 
 // RequestRefund creates a new refund request for a paid order.
@@ -176,12 +182,9 @@ func (s *RefundService) Reject(ctx context.Context, refundNo, reviewerID, review
 	return nil
 }
 
-// publishRefundCompleted emits a best-effort identity.refund.completed NATS event.
-// Failures are logged but never propagated — the DB state is the source of truth.
+// publishRefundCompleted writes the refund event to the outbox for reliable delivery.
+// Falls back to direct NATS publish if the outbox is unavailable.
 func (s *RefundService) publishRefundCompleted(r *entity.Refund) {
-	if s.publisher == nil {
-		return
-	}
 	payload := map[string]any{
 		"refund_no":  r.RefundNo,
 		"order_no":   r.OrderNo,
@@ -190,6 +193,21 @@ func (s *RefundService) publishRefundCompleted(r *entity.Refund) {
 	ev, err := event.NewEvent("identity.refund.completed", r.AccountID, "", "", payload)
 	if err != nil {
 		slog.Error("refund/publish: build event", "refund_no", r.RefundNo, "err", err)
+		return
+	}
+
+	// Primary path: write to outbox (relay will publish to NATS).
+	if s.outbox != nil {
+		if err := s.outbox.Insert(context.Background(), ev); err != nil {
+			slog.Error("refund/publish: outbox insert failed, falling back to direct publish",
+				"refund_no", r.RefundNo, "err", err)
+		} else {
+			return
+		}
+	}
+
+	// Fallback: direct NATS publish (best-effort).
+	if s.publisher == nil {
 		return
 	}
 	pubCtx, cancel := context.WithTimeout(context.Background(), refundPublishTimeout)

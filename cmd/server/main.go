@@ -157,7 +157,8 @@ func run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("nats publisher: %w", err)
 	}
-	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher)
+	outboxRepo := repo.NewOutboxRepo(db)
+	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher, outboxRepo)
 
 	// --- NATS Consumer ---
 	consumer, err := identitynats.NewConsumer(nc, vipSvc)
@@ -299,8 +300,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// --- Cron Jobs ---
-	expiryJob := cron.NewExpiryJob(subSvc, publisher, rdb)
-	renewalJob := cron.NewRenewalJob(subSvc, subRepo, productRepo, walletSvc, publisher, rdb, time.Hour)
+	expiryJob := cron.NewExpiryJob(subSvc, publisher, rdb, outboxRepo)
+	renewalJob := cron.NewRenewalJob(subSvc, subRepo, productRepo, walletSvc, publisher, rdb, time.Hour, outboxRepo)
+	outboxRelay := cron.NewOutboxRelay(outboxRepo, publisher)
 	notifJob := cron.NewNotificationJob(subRepo, accountRepo, emailSender, rdb, 24*time.Hour)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -332,6 +334,11 @@ func run(ctx context.Context, cfg *config.Config) error {
 	// Expiry notification email cron
 	g.Go(func() error {
 		return notifJob.Run(gctx)
+	})
+
+	// Outbox relay (publishes outbox events to NATS)
+	g.Go(func() error {
+		return outboxRelay.Run(gctx)
 	})
 
 	// Graceful shutdown trigger

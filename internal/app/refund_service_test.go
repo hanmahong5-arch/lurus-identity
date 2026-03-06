@@ -13,7 +13,7 @@ func makeRefundService() (*RefundService, *mockRefundStore, *mockWalletStore) {
 	ws := newMockWalletStore()
 	rs := newMockRefundStore()
 	// nil publisher: publishRefundCompleted is a no-op when publisher is nil.
-	svc := NewRefundService(rs, ws, nil)
+	svc := NewRefundService(rs, ws, nil, nil)
 	return svc, rs, ws
 }
 

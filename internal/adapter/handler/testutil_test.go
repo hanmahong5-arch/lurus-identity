@@ -459,7 +459,7 @@ func makeInvoiceService() *app.InvoiceService {
 }
 
 func makeRefundService() *app.RefundService {
-	return app.NewRefundService(&mockRefundStore{}, newMockWalletStore(), &mockPublisher{})
+	return app.NewRefundService(&mockRefundStore{}, newMockWalletStore(), &mockPublisher{}, nil)
 }
 
 func makeReferralService() *app.ReferralService {

@@ -27,6 +27,8 @@ const (
 
 	// renewalTxType is the wallet transaction type used for subscription auto-renewal debits.
 	renewalTxType = "subscription_renewal"
+	// renewalRefundTxType is the wallet transaction type for compensating a failed activation after debit.
+	renewalRefundTxType = "subscription_renewal_refund"
 )
 
 // renewalStore is the subset of subscriptionStore needed by RenewalJob.
@@ -50,6 +52,7 @@ type RenewalJob struct {
 	publisher EventPublisher
 	rdb       *redis.Client
 	interval  time.Duration
+	outbox    outboxWriter
 }
 
 // NewRenewalJob creates a new RenewalJob.
@@ -61,6 +64,7 @@ func NewRenewalJob(
 	publisher EventPublisher,
 	rdb *redis.Client,
 	interval time.Duration,
+	outbox outboxWriter,
 ) *RenewalJob {
 	return &RenewalJob{
 		subs:      subs,
@@ -70,6 +74,7 @@ func NewRenewalJob(
 		publisher: publisher,
 		rdb:       rdb,
 		interval:  interval,
+		outbox:    outbox,
 	}
 }
 
@@ -172,13 +177,37 @@ func (j *RenewalJob) processOne(ctx context.Context, sub entity.Subscription) er
 			sub.ExternalSubID,
 		)
 		if activateErr != nil {
-			// Activation failed after debit — log but treat as success for renewal_attempts
-			// (the funds were already deducted; this needs manual review).
-			slog.Error("cron/renewal: activate after debit succeeded",
-				"sub_id", sub.ID,
-				"account_id", sub.AccountID,
-				"err", activateErr,
+			// Activation failed after debit — compensate by crediting back the funds.
+			refundRef := fmt.Sprintf("refund:renewal:sub:%d", sub.ID)
+			_, creditErr := j.wallets.Credit(ctx,
+				sub.AccountID,
+				plan.PriceCNY,
+				renewalRefundTxType,
+				fmt.Sprintf("Renewal refund: activation failed for plan %s", plan.Code),
+				"subscription",
+				refundRef,
+				sub.ProductID,
 			)
+			if creditErr != nil {
+				// CRITICAL: money deducted but refund failed — requires manual intervention.
+				slog.Error("CRITICAL: cron/renewal: compensation credit failed after activation failure",
+					"sub_id", sub.ID,
+					"account_id", sub.AccountID,
+					"plan_id", sub.PlanID,
+					"amount", plan.PriceCNY,
+					"debit_ref", orderRef,
+					"activate_err", activateErr,
+					"credit_err", creditErr,
+				)
+			} else {
+				slog.Warn("cron/renewal: activation failed, funds refunded",
+					"sub_id", sub.ID,
+					"account_id", sub.AccountID,
+					"amount", plan.PriceCNY,
+				)
+			}
+			// Return error so the subscription enters backoff retry instead of being silently reset.
+			return fmt.Errorf("activate after debit (funds refunded): %w", activateErr)
 		}
 
 		// Reset renewal state on the original subscription row.
@@ -226,14 +255,27 @@ func nextRenewalAt(attempts int) *time.Time {
 	return &t
 }
 
-// publishRenewalEvent is a best-effort NATS event publisher; failures are logged but not fatal.
-func (j *RenewalJob) publishRenewalEvent(_ context.Context, subject string, accountID int64, productID string, payload any) {
-	if j.publisher == nil {
-		return
-	}
+// publishRenewalEvent writes the event to the outbox for reliable delivery.
+// Falls back to direct NATS publish if the outbox is unavailable.
+func (j *RenewalJob) publishRenewalEvent(ctx context.Context, subject string, accountID int64, productID string, payload any) {
 	ev, err := event.NewEvent(subject, accountID, "", productID, payload)
 	if err != nil {
 		slog.Error("cron/renewal: build event", "err", err)
+		return
+	}
+
+	// Primary path: write to outbox (relay will publish to NATS).
+	if j.outbox != nil {
+		if err := j.outbox.Insert(ctx, ev); err != nil {
+			slog.Error("cron/renewal: outbox insert failed, falling back to direct publish",
+				"subject", subject, "err", err)
+		} else {
+			return
+		}
+	}
+
+	// Fallback: direct NATS publish (best-effort).
+	if j.publisher == nil {
 		return
 	}
 	pubCtx, cancel := context.WithTimeout(context.Background(), publishEventTimeout)

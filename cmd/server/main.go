@@ -23,6 +23,7 @@ import (
 
 	otelgin "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
+	identitygrpc "github.com/hanmahong5-arch/lurus-identity/internal/adapter/grpc"
 	"github.com/hanmahong5-arch/lurus-identity/internal/adapter/handler"
 	identitynats "github.com/hanmahong5-arch/lurus-identity/internal/adapter/nats"
 	"github.com/hanmahong5-arch/lurus-identity/internal/adapter/handler/router"
@@ -314,6 +315,20 @@ func run(ctx context.Context, cfg *config.Config) error {
 			return fmt.Errorf("http server: %w", err)
 		}
 		return nil
+	})
+
+	// gRPC server (dual-protocol: HTTP + gRPC)
+	grpcSrv := identitygrpc.NewServer(identitygrpc.Deps{
+		Accounts:     accountSvc,
+		Entitlements: entSvc,
+		Overview:     overviewSvc,
+		VIP:          vipSvc,
+		Wallet:       walletSvc,
+		Referral:     referralSvc,
+		InternalKey:  cfg.InternalAPIKey,
+	})
+	g.Go(func() error {
+		return grpcSrv.ListenAndServe(gctx, cfg.GRPCPort)
 	})
 
 	// NATS consumer

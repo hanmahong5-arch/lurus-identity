@@ -54,6 +54,8 @@ spec:
           ports:
             - containerPort: 18104
               name: http
+            - containerPort: 18105
+              name: grpc
           envFrom:
             - configMapRef:
                 name: lurus-identity-config

@@ -5,6 +5,7 @@ metadata:
   namespace: lurus-identity
 data:
   PORT: "18104"
+  GRPC_PORT: "18105"
   TZ: "Asia/Shanghai"
   ENV: "production"
   REDIS_ADDR: "redis.lurus-system.svc:6379"

@@ -11,8 +11,9 @@ import (
 // Config holds all service configuration.
 type Config struct {
 	// Server
-	Port int
-	Env  string
+	Port     int
+	GRPCPort int
+	Env      string
 
 	// Database
 	DatabaseDSN string
@@ -95,6 +96,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Port:                parseInt("PORT", 18104),
+		GRPCPort:            parseInt("GRPC_PORT", 18105),
 		Env:                 getEnv("ENV", "production"),
 		DatabaseDSN:         requireEnv("DATABASE_DSN"),
 		RedisAddr:           getEnv("REDIS_ADDR", "redis.messaging.svc:6379"),

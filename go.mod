@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/Calcium-Ion/go-epay v0.0.4
+	github.com/aliyun/alibaba-cloud-sdk-go v1.63.107
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.6.0
@@ -12,17 +13,16 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/stripe/stripe-go/v76 v76.25.0
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.53
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sms v1.1.49
 	golang.org/x/sync v0.10.0
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
 )
 
 require (
-	github.com/aliyun/alibaba-cloud-sdk-go v1.63.107 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.53 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sms v1.1.49 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
 
@@ -48,7 +48,7 @@ require (
 	github.com/go-playground/validator/v10 v10.22.1 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
-	github.com/hanmahong5-arch/lurus-proto v0.0.0
+	github.com/hanmahong5-arch/lurus-proto v0.0.1
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
 	github.com/jackc/pgx/v5 v5.5.5 // indirect
@@ -99,5 +99,3 @@ require (
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/sqlite v1.23.1 // indirect
 )
-
-replace github.com/hanmahong5-arch/lurus-proto => ../lurus-proto

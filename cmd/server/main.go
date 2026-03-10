@@ -159,18 +159,18 @@ func run(ctx context.Context, cfg *config.Config) error {
 	overviewSvc := app.NewOverviewService(accountRepo, vipSvc, walletRepo, subSvc, productRepo, ovCache)
 	checkinSvc := app.NewCheckinService(checkinRepo, walletRepo)
 
-	// --- NATS Publisher ---
+	// --- NATS Publisher (non-fatal: degrade gracefully if NATS unavailable) ---
 	publisher, err := identitynats.NewPublisher(nc)
 	if err != nil {
-		return fmt.Errorf("nats publisher: %w", err)
+		slog.Warn("nats publisher init failed, event publishing disabled", "err", err)
 	}
 	outboxRepo := repo.NewOutboxRepo(db)
 	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher, outboxRepo)
 
-	// --- NATS Consumer ---
+	// --- NATS Consumer (non-fatal) ---
 	consumer, err := identitynats.NewConsumer(nc, vipSvc)
 	if err != nil {
-		return fmt.Errorf("nats consumer: %w", err)
+		slog.Warn("nats consumer init failed, event consumption disabled", "err", err)
 	}
 
 	// --- Payment Providers ---
@@ -352,10 +352,12 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return grpcSrv.ListenAndServe(gctx, cfg.GRPCPort)
 	})
 
-	// NATS consumer
-	g.Go(func() error {
-		return consumer.Run(gctx)
-	})
+	// NATS consumer (skip if init failed)
+	if consumer != nil {
+		g.Go(func() error {
+			return consumer.Run(gctx)
+		})
+	}
 
 	// Subscription expiry cron
 	g.Go(func() error {

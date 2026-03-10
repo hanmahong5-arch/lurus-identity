@@ -28,6 +28,12 @@ jobs:
           go-version: "1.25"
           cache: true
 
+      - name: Configure private Go modules
+        run: |
+          git config --global url."https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          echo "GOPRIVATE=github.com/hanmahong5-arch/*" >> "$GITHUB_ENV"
+          echo "GONOSUMCHECK=github.com/hanmahong5-arch/*" >> "$GITHUB_ENV"
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         continue-on-error: true
@@ -93,6 +99,8 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           tags: |
             ${{ env.GHCR_REPO }}:main
             ${{ env.GHCR_REPO }}:${{ steps.version.outputs.value }}

@@ -8,7 +8,15 @@ RUN bun run build
 
 FROM golang:1.25-alpine AS builder
 
+ARG GITHUB_TOKEN
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+ENV GOPRIVATE=github.com/hanmahong5-arch/*
+ENV GONOSUMCHECK=github.com/hanmahong5-arch/*
+
+RUN apk add --no-cache git && \
+    if [ -n "$GITHUB_TOKEN" ]; then \
+      git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
+    fi
 
 WORKDIR /build
 

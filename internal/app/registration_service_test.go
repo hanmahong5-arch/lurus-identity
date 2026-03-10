@@ -282,16 +282,16 @@ func TestRegistrationService_NewRegistrationService_NilForEmptySecret(t *testing
 	}
 }
 
-// TestRegistrationService_NewRegistrationService_NilForNilZitadel verifies nil return for nil client.
-func TestRegistrationService_NewRegistrationService_NilForNilZitadel(t *testing.T) {
+// TestRegistrationService_NewRegistrationService_NilZitadelStillWorks verifies service works without Zitadel.
+func TestRegistrationService_NewRegistrationService_NilZitadelStillWorks(t *testing.T) {
 	svc := NewRegistrationService(
 		newMockAccountStore(), newMockWalletStore(), newMockVIPStore(nil), nil,
-		nil, // nil Zitadel client -> should return nil
+		nil, // nil Zitadel client -> service still works, just skips Zitadel user creation
 		testSessionSecret,
 		lurusemail.NoopSender{}, sms.NoopSender{}, nil, sms.SMSConfig{},
 	)
-	if svc != nil {
-		t.Error("nil Zitadel client should produce nil service")
+	if svc == nil {
+		t.Error("nil Zitadel client should still produce a working service")
 	}
 }
 

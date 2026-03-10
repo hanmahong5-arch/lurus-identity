@@ -67,7 +67,8 @@ type RegistrationService struct {
 }
 
 // NewRegistrationService creates the registration service.
-// Returns nil if zitadel client or sessionSecret is not configured.
+// Returns nil if sessionSecret is not configured.
+// Zitadel client is optional — if nil, users are created locally only.
 func NewRegistrationService(
 	accounts accountStore,
 	wallets walletStore,
@@ -80,7 +81,7 @@ func NewRegistrationService(
 	rdb *redis.Client,
 	smsCfg sms.SMSConfig,
 ) *RegistrationService {
-	if zc == nil || sessionSecret == "" {
+	if sessionSecret == "" {
 		return nil
 	}
 	return &RegistrationService{
@@ -156,10 +157,14 @@ func (s *RegistrationService) Register(ctx context.Context, req RegisterRequest)
 		phone = req.Username
 	}
 
-	// Create user in Zitadel with username.
-	zUser, err := s.zitadel.CreateHumanUserWithUsername(ctx, req.Username, req.Password, emailAddr)
-	if err != nil {
-		return nil, fmt.Errorf("register: create zitadel user: %w", err)
+	// Create user in Zitadel with username (optional — skip if Zitadel not configured).
+	var zitadelSub string
+	if s.zitadel != nil {
+		zUser, err := s.zitadel.CreateHumanUserWithUsername(ctx, req.Username, req.Password, emailAddr)
+		if err != nil {
+			return nil, fmt.Errorf("register: create zitadel user: %w", err)
+		}
+		zitadelSub = zUser.UserID
 	}
 
 	// Create local account.
@@ -172,7 +177,7 @@ func (s *RegistrationService) Register(ctx context.Context, req RegisterRequest)
 		displayName = emailAddr
 	}
 	account := &entity.Account{
-		ZitadelSub:  zUser.UserID,
+		ZitadelSub:  zitadelSub,
 		Username:    req.Username,
 		Email:       emailAddr,
 		Phone:       phone,

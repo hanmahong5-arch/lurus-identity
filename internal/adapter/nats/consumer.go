@@ -56,6 +56,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 			<-ctx.Done()
 			return nil
 		}
+		// Also degrade gracefully on connection timeout (NATS unreachable).
+		if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
+			slog.Warn("nats consumer: subscribe failed (timeout); event consumption disabled",
+				"subject", event.SubjectLLMUsageReported, "err", err)
+			<-ctx.Done()
+			return nil
+		}
 		return fmt.Errorf("subscribe %s: %w", event.SubjectLLMUsageReported, err)
 	}
 	defer sub.Unsubscribe()

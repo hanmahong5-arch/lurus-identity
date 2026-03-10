@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Button, Card, Form, TabPane, Tabs, Toast, Typography } from '@douyinfe/semi-ui'
 import { storeLurusToken, isLoggedIn } from '../../auth'
 import { useStore } from '../../store'
@@ -28,7 +28,7 @@ export default function LoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: values.username,
+          identifier: values.username,
           password: values.password,
         }),
       })
@@ -62,15 +62,15 @@ export default function LoginPage() {
         </div>
 
         <Tabs activeKey={activeTab} onChange={setActiveTab} centered>
-          {/* Email / password tab */}
-          <TabPane itemKey="email" tab="邮箱登录">
+          {/* Account login tab */}
+          <TabPane itemKey="email" tab="账号登录">
             <Form onSubmit={handleEmailSubmit} style={{ marginTop: 16 }}>
               <Form.Input
                 field="username"
-                label="邮箱"
-                type="email"
-                placeholder="your@email.com"
-                rules={[{ required: true, message: '请输入邮箱' }]}
+                label="账号"
+                type="text"
+                placeholder="用户名 / 手机号 / 邮箱"
+                rules={[{ required: true, message: '请输入账号' }]}
               />
               <Form.Input
                 field="password"
@@ -80,14 +80,9 @@ export default function LoginPage() {
                 rules={[{ required: true, message: '请输入密码' }]}
               />
               <div style={{ textAlign: 'right', marginBottom: 8 }}>
-                <a
-                  href="https://auth.lurus.cn/ui/login/loginname"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: 12, color: '#1677ff' }}
-                >
+                <Link to="/forgot-password" style={{ fontSize: 12, color: '#1677ff' }}>
                   忘记密码?
-                </a>
+                </Link>
               </div>
               <Button
                 htmlType="submit"
@@ -102,14 +97,9 @@ export default function LoginPage() {
 
             <div style={{ textAlign: 'center', marginTop: 16 }}>
               <Text type="tertiary" size="small">还没有账号？</Text>
-              <a
-                href="https://auth.lurus.cn/ui/login/loginname"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 12, color: '#1677ff', marginLeft: 4 }}
-              >
+              <Link to="/register" style={{ fontSize: 12, color: '#1677ff', marginLeft: 4 }}>
                 去注册
-              </a>
+              </Link>
             </div>
           </TabPane>
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,6 +87,30 @@ func (m *mockAccountStore) GetByAffCode(_ context.Context, code string) (*entity
 	defer m.mu.Unlock()
 	for _, a := range m.byID {
 		if a.AffCode == code {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAccountStore) GetByUsername(_ context.Context, username string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if strings.EqualFold(a.Username, username) && username != "" {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAccountStore) GetByPhone(_ context.Context, phone string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if a.Phone == phone && phone != "" {
 			cp := *a
 			return &cp, nil
 		}
@@ -518,4 +543,136 @@ func withAccountID(id int64) gin.HandlerFunc {
 		c.Set("account_id", id)
 		c.Next()
 	}
+}
+
+// ---------- error-injection stores for handler tests ----------
+
+// errWalletH overrides wallet store methods to return errors, enabling handler error-path tests.
+type errWalletH struct {
+	mockWalletStore
+}
+
+// GetByAccountID fails unconditionally.
+func (s *errWalletH) GetByAccountID(_ context.Context, _ int64) (*entity.Wallet, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// GetOrCreate also fails so WalletService.GetWallet errors regardless of which method it calls.
+func (s *errWalletH) GetOrCreate(_ context.Context, _ int64) (*entity.Wallet, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// ListOrders fails to test the ListOrders error path.
+func (s *errWalletH) ListOrders(_ context.Context, _ int64, _, _ int) ([]entity.PaymentOrder, int64, error) {
+	return nil, 0, fmt.Errorf("db error")
+}
+
+// errSubStoreH overrides ListByAccount to return errors.
+type errSubStoreH struct {
+	mockSubStore
+}
+
+func (s *errSubStoreH) ListByAccount(_ context.Context, _ int64) ([]entity.Subscription, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// emailAwareAccountStore extends mockAccountStore with a working GetByEmail lookup.
+type emailAwareAccountStore struct {
+	mockAccountStore
+	byEmail map[string]*entity.Account
+}
+
+func newEmailAwareAccountStore() *emailAwareAccountStore {
+	return &emailAwareAccountStore{
+		mockAccountStore: *newMockAccountStore(),
+		byEmail:          make(map[string]*entity.Account),
+	}
+}
+
+func (s *emailAwareAccountStore) GetByEmail(_ context.Context, email string) (*entity.Account, error) {
+	a, ok := s.byEmail[email]
+	if !ok {
+		return nil, nil
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (s *emailAwareAccountStore) seedEmail(a entity.Account) *entity.Account {
+	cp := s.seed(a)
+	if cp.Email != "" {
+		s.byEmail[cp.Email] = cp
+	}
+	return cp
+}
+
+// errEmailAccountStore returns an error for GetByEmail.
+type errEmailAccountStore struct {
+	mockAccountStore
+}
+
+func (s *errEmailAccountStore) GetByEmail(_ context.Context, _ string) (*entity.Account, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// errAccountStoreH returns an error for GetByID (used to trigger overview/account error paths).
+type errAccountStoreH struct {
+	mockAccountStore
+}
+
+func (s *errAccountStoreH) GetByID(_ context.Context, _ int64) (*entity.Account, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// errEntSubStore returns an error for GetEntitlements.
+type errEntSubStore struct {
+	mockSubStore
+}
+
+func (s *errEntSubStore) GetEntitlements(_ context.Context, _ int64, _ string) ([]entity.AccountEntitlement, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// errGetActiveSubStore returns an error for GetActive.
+type errGetActiveSubStore struct {
+	mockSubStore
+}
+
+func (s *errGetActiveSubStore) GetActive(_ context.Context, _ int64, _ string) (*entity.Subscription, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// errGetWalletH allows Credit but fails on GetOrCreate (used to test GetWallet error paths).
+// WalletService.GetWallet calls GetOrCreate; Credit uses the store's Credit method directly.
+type errGetWalletH struct {
+	mockWalletStore
+}
+
+func (s *errGetWalletH) GetOrCreate(_ context.Context, _ int64) (*entity.Wallet, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+func (s *errGetWalletH) GetByAccountID(_ context.Context, _ int64) (*entity.Wallet, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// errOAuthBindingStoreH returns an error from GetByOAuthBinding.
+type errOAuthBindingStoreH struct{ mockAccountStore }
+
+func (s *errOAuthBindingStoreH) GetByOAuthBinding(_ context.Context, _, _ string) (*entity.Account, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// oauthAwareAccountStore returns a seeded account for GetByOAuthBinding lookups.
+type oauthAwareAccountStore struct {
+	mockAccountStore
+	oauthAccount *entity.Account
+}
+
+func (s *oauthAwareAccountStore) GetByOAuthBinding(_ context.Context, _, _ string) (*entity.Account, error) {
+	if s.oauthAccount == nil {
+		return nil, nil
+	}
+	cp := *s.oauthAccount
+	return &cp, nil
 }

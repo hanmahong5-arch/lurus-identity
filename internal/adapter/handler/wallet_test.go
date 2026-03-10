@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/adapter/payment"
+	"github.com/hanmahong5-arch/lurus-identity/internal/app"
 )
 
 func TestWalletHandler_GetWallet(t *testing.T) {
@@ -274,4 +277,164 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// ---------- resolveCheckout (wallet topup provider routing) ----------
+
+// TestWalletHandler_CreateTopup_EpayAlipay_ProviderNil verifies 400 when epay is nil.
+func TestWalletHandler_CreateTopup_EpayAlipay_ProviderNil(t *testing.T) {
+	h := NewWalletHandler(makeWalletService(), nil, nil, nil)
+	r := testRouter()
+	r.POST("/api/v1/wallet/topup", withAccountID(1), h.CreateTopup)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"amount_cny":     10.0,
+		"payment_method": "epay_alipay",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallet/topup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (epay provider not configured)", w.Code)
+	}
+}
+
+// TestWalletHandler_CreateTopup_EpayWxpay_ProviderNil verifies 400 for epay_wxpay with nil provider.
+func TestWalletHandler_CreateTopup_EpayWxpay_ProviderNil(t *testing.T) {
+	h := NewWalletHandler(makeWalletService(), nil, nil, nil)
+	r := testRouter()
+	r.POST("/api/v1/wallet/topup", withAccountID(1), h.CreateTopup)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"amount_cny":     10.0,
+		"payment_method": "epay_wxpay",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallet/topup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (epay_wxpay provider not configured)", w.Code)
+	}
+}
+
+// TestWalletHandler_CreateTopup_Creem_ProviderNil verifies 400 for creem with nil provider.
+func TestWalletHandler_CreateTopup_Creem_ProviderNil(t *testing.T) {
+	h := NewWalletHandler(makeWalletService(), nil, nil, nil)
+	r := testRouter()
+	r.POST("/api/v1/wallet/topup", withAccountID(1), h.CreateTopup)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"amount_cny":     10.0,
+		"payment_method": "creem",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallet/topup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (creem provider not configured)", w.Code)
+	}
+}
+
+func TestWalletHandler_GetWallet_Error(t *testing.T) {
+	store := &errWalletH{}
+	svc := app.NewWalletService(store, makeVIPService())
+	h := NewWalletHandler(svc, nil, nil, nil)
+	r := testRouter()
+	r.GET("/api/v1/wallet", withAccountID(1), h.GetWallet)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/wallet", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestWalletHandler_ListOrders_Error(t *testing.T) {
+	store := &errWalletH{}
+	svc := app.NewWalletService(store, makeVIPService())
+	h := NewWalletHandler(svc, nil, nil, nil)
+	r := testRouter()
+	r.GET("/api/v1/wallet/orders", withAccountID(1), h.ListOrders)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/wallet/orders", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWalletHandler_AdminAdjustWallet_NegativeAmount verifies 400 when debit fails due to insufficient balance.
+func TestWalletHandler_AdminAdjustWallet_NegativeAmount(t *testing.T) {
+	h := NewWalletHandler(makeWalletService(), nil, nil, nil)
+	r := testRouter()
+	r.POST("/admin/v1/accounts/:id/wallet/adjust", h.AdminAdjustWallet)
+
+	// amount=-50 on a zero-balance wallet → Debit fails (insufficient balance) → 400
+	body, _ := json.Marshal(map[string]interface{}{"amount": -50.0, "description": "refund"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/accounts/1/wallet/adjust", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWalletHandler_AdminAdjustWallet_GetWalletError verifies 500 when GetWallet fails after credit.
+func TestWalletHandler_AdminAdjustWallet_GetWalletError(t *testing.T) {
+	store := &errGetWalletH{*newMockWalletStore()}
+	svc := app.NewWalletService(store, makeVIPService())
+	h := NewWalletHandler(svc, nil, nil, nil)
+	r := testRouter()
+	r.POST("/admin/v1/accounts/:id/wallet/adjust", h.AdminAdjustWallet)
+
+	// Credit (amount=100) succeeds, but GetByAccountID fails → 500
+	body, _ := json.Marshal(map[string]interface{}{"amount": 100.0, "description": "bonus"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/accounts/1/wallet/adjust", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWalletHandler_TopupInfo_AllProviders verifies payment_methods includes epay, stripe, and creem entries.
+func TestWalletHandler_TopupInfo_AllProviders(t *testing.T) {
+	epayProvider, err := payment.NewEpayProvider("12345", "testkey12345678", "https://pay.example.com", "https://notify.example.com")
+	if err != nil {
+		t.Fatalf("NewEpayProvider: %v", err)
+	}
+	stripeProvider := payment.NewStripeProvider("sk_test_fake", "whsec_fake")
+	creemProvider, err := payment.NewCreemProvider("creem_key", "creem_secret")
+	if err != nil {
+		t.Fatalf("NewCreemProvider: %v", err)
+	}
+
+	h := NewWalletHandler(makeWalletService(), epayProvider, stripeProvider, creemProvider)
+	r := testRouter()
+	r.GET("/api/v1/wallet/topup/info", withAccountID(1), h.TopupInfo)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallet/topup/info", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	methods, _ := resp["payment_methods"].([]interface{})
+	// epay adds 2 (alipay + wxpay) + 1 stripe + 1 creem = 4
+	if len(methods) != 4 {
+		t.Errorf("expected 4 payment methods with all providers, got %d", len(methods))
+	}
 }

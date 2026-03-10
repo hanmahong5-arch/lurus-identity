@@ -86,6 +86,9 @@ type Config struct {
 	NewAPIAdminAccessToken string // NEWAPI_ADMIN_ACCESS_TOKEN
 	NewAPIAdminUserID      string // NEWAPI_ADMIN_USER_ID
 
+	// SMS
+	SMSProvider string // SMS_PROVIDER ("tencent" or "aliyun"; empty = noop)
+
 	// OpenTelemetry tracing
 	OtelEndpoint    string // OTEL_EXPORTER_OTLP_ENDPOINT (empty = noop)
 	OtelServiceName string // OTEL_SERVICE_NAME (default: lurus-identity)
@@ -137,6 +140,7 @@ func Load() (*Config, error) {
 		NewAPIInternalURL:      getEnv("NEWAPI_INTERNAL_URL", ""),
 		NewAPIAdminAccessToken: getEnv("NEWAPI_ADMIN_ACCESS_TOKEN", ""),
 		NewAPIAdminUserID:      getEnv("NEWAPI_ADMIN_USER_ID", ""),
+		SMSProvider:         getEnv("SMS_PROVIDER", ""),
 		OtelEndpoint:        getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OtelServiceName:     getEnv("OTEL_SERVICE_NAME", "lurus-identity"),
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
@@ -164,5 +165,23 @@ func TestEntitlementService_CacheHit(t *testing.T) {
 	}
 	if em["plan_code"] != "gold" {
 		t.Errorf("plan_code=%q, want gold (cache hit)", em["plan_code"])
+	}
+}
+
+// errDeleteSubStore returns an error from DeleteEntitlements to cover the ResetToFree error branch.
+type errDeleteSubStore struct{ mockSubStore }
+
+func (s *errDeleteSubStore) DeleteEntitlements(_ context.Context, _ int64, _ string) error {
+	return fmt.Errorf("db delete error")
+}
+
+// TestEntitlementService_ResetToFree_DeleteError covers the DeleteEntitlements error branch.
+func TestEntitlementService_ResetToFree_DeleteError(t *testing.T) {
+	errSub := &errDeleteSubStore{*newMockSubStore()}
+	svc := NewEntitlementService(errSub, newMockPlanStore(), newMockCache())
+
+	err := svc.ResetToFree(context.Background(), 1, "llm-api")
+	if err == nil {
+		t.Fatal("expected error from DeleteEntitlements, got nil")
 	}
 }

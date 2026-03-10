@@ -8,10 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hanmahong5-arch/lurus-identity/internal/app"
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/auth"
 )
 
@@ -19,15 +21,24 @@ import (
 // Required config: ZITADEL_ISSUER + ZITADEL_SERVICE_ACCOUNT_PAT + SESSION_SECRET.
 type ZLoginHandler struct {
 	accounts          *app.AccountService
+	accountStore      accountStoreForLogin
 	zitadelIssuer     string // e.g. https://auth.lurus.cn
 	serviceAccountPAT string // Zitadel PAT with session creation rights
 	sessionSecret     string // for validating lurus-issued session tokens
+}
+
+// accountStoreForLogin is a minimal interface for resolving login identifiers.
+type accountStoreForLogin interface {
+	GetByEmail(ctx context.Context, email string) (*entity.Account, error)
+	GetByPhone(ctx context.Context, phone string) (*entity.Account, error)
+	GetByUsername(ctx context.Context, username string) (*entity.Account, error)
 }
 
 // NewZLoginHandler creates the handler.
 // Returns nil when serviceAccountPAT is empty (custom login disabled).
 func NewZLoginHandler(
 	accounts *app.AccountService,
+	accountStore accountStoreForLogin,
 	zitadelIssuer, serviceAccountPAT, sessionSecret string,
 ) *ZLoginHandler {
 	if serviceAccountPAT == "" {
@@ -35,6 +46,7 @@ func NewZLoginHandler(
 	}
 	return &ZLoginHandler{
 		accounts:          accounts,
+		accountStore:      accountStore,
 		zitadelIssuer:     zitadelIssuer,
 		serviceAccountPAT: serviceAccountPAT,
 		sessionSecret:     sessionSecret,
@@ -165,15 +177,26 @@ func (h *ZLoginHandler) LinkWechatAndComplete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"callback_url": callbackURL})
 }
 
-// DirectLogin authenticates with email + password and returns a lurus session token.
+// DirectLogin authenticates with identifier (username/email/phone) + password and returns a lurus session token.
 // POST /api/v1/auth/login  (no OIDC — stays entirely within identity.lurus.cn)
 func (h *ZLoginHandler) DirectLogin(c *gin.Context) {
 	var req struct {
-		Username string `json:"username" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Identifier string `json:"identifier"`
+		Username   string `json:"username"` // backward compatibility
+		Password   string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+
+	// Support both "identifier" and legacy "username" field.
+	identifier := req.Identifier
+	if identifier == "" {
+		identifier = req.Username
+	}
+	if identifier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "identifier is required"})
 		return
 	}
 
@@ -182,8 +205,16 @@ func (h *ZLoginHandler) DirectLogin(c *gin.Context) {
 		return
 	}
 
+	// Resolve identifier to Zitadel loginName.
+	loginName, err := h.resolveLoginName(c.Request.Context(), identifier)
+	if err != nil {
+		slog.Warn("direct-login: resolve login name failed", "identifier", identifier, "err", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
 	// Step 1: Verify credentials via Zitadel Session API.
-	sessionID, _, err := h.createSessionByCredentials(c.Request.Context(), req.Username, req.Password)
+	sessionID, _, err := h.createSessionByCredentials(c.Request.Context(), loginName, req.Password)
 	if err != nil {
 		slog.Warn("direct-login: credential check failed", "err", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
@@ -266,6 +297,53 @@ func (h *ZLoginHandler) getSessionUser(ctx context.Context, sessionID string) (s
 		return "", "", "", fmt.Errorf("Zitadel session has no user factor (body: %s)", respBody)
 	}
 	return user.ID, user.LoginName, user.DisplayName, nil
+}
+
+// resolveLoginName resolves an identifier (email/phone/username) to the Zitadel loginName.
+// For old users, Zitadel loginName is their email. For new users, it's their username.
+func (h *ZLoginHandler) resolveLoginName(ctx context.Context, identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
+
+	// If it looks like an email, try email lookup first.
+	if strings.Contains(identifier, "@") {
+		acc, err := h.accountStore.GetByEmail(ctx, identifier)
+		if err != nil {
+			return "", fmt.Errorf("lookup by email: %w", err)
+		}
+		if acc != nil {
+			// Old users have Zitadel loginName = email; new users have loginName = username.
+			// Use username if set, otherwise fall back to email (for pre-migration accounts).
+			if acc.Username != "" {
+				return acc.Username, nil
+			}
+			return acc.Email, nil
+		}
+		// Not found locally — try using the identifier directly as Zitadel loginName.
+		return identifier, nil
+	}
+
+	// If it looks like a phone number, try phone lookup.
+	if entity.IsPhoneNumber(identifier) {
+		acc, err := h.accountStore.GetByPhone(ctx, identifier)
+		if err != nil {
+			return "", fmt.Errorf("lookup by phone: %w", err)
+		}
+		if acc != nil && acc.Username != "" {
+			return acc.Username, nil
+		}
+	}
+
+	// Try username lookup.
+	acc, err := h.accountStore.GetByUsername(ctx, identifier)
+	if err != nil {
+		return "", fmt.Errorf("lookup by username: %w", err)
+	}
+	if acc != nil {
+		return acc.Username, nil
+	}
+
+	// Fall through: use identifier directly (let Zitadel reject if invalid).
+	return identifier, nil
 }
 
 // --- Internal helpers ---

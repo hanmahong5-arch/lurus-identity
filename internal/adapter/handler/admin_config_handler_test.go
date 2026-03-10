@@ -187,3 +187,116 @@ func TestAdminConfigHandler_GetPublicQRCode_Empty(t *testing.T) {
 		t.Errorf("status = %d, want 204", w.Code)
 	}
 }
+
+func TestAdminConfigHandler_GetPublicQRCode_UnknownType(t *testing.T) {
+	h := NewAdminConfigHandler(makeAdminConfigSvc(nil))
+	r := testRouter()
+	r.GET("/api/v1/public/qrcode/:type", h.GetPublicQRCode)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/qrcode/paypal", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestAdminConfigHandler_GetPublicQRCode_InvalidBase64Stored(t *testing.T) {
+	settings := []entity.AdminSetting{
+		{Key: "qr_static_wechat", Value: "!!!not-valid-base64!!!"},
+	}
+	h := NewAdminConfigHandler(makeAdminConfigSvc(settings))
+	r := testRouter()
+	r.GET("/api/v1/public/qrcode/:type", h.GetPublicQRCode)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/qrcode/wechat", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204 for invalid base64", w.Code)
+	}
+}
+
+func TestAdminConfigHandler_GetPublicQRCode_JPEGDetection(t *testing.T) {
+	// JPEG magic bytes: FF D8
+	jpegBytes := []byte{0xFF, 0xD8, 0x00, 0x00, 0x00}
+	jpegBase64 := base64.StdEncoding.EncodeToString(jpegBytes)
+	settings := []entity.AdminSetting{
+		{Key: "qr_channel_promo", Value: jpegBase64},
+	}
+	h := NewAdminConfigHandler(makeAdminConfigSvc(settings))
+	r := testRouter()
+	r.GET("/api/v1/public/qrcode/:type", h.GetPublicQRCode)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/qrcode/channel", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	ct := w.Header().Get("Content-Type")
+	if ct != "image/jpeg" {
+		t.Errorf("Content-Type = %q, want image/jpeg", ct)
+	}
+}
+
+func TestAdminConfigHandler_UpdateSettings_InvalidJSON(t *testing.T) {
+	h := NewAdminConfigHandler(makeAdminConfigSvc(nil))
+	r := testRouter()
+	r.PUT("/admin/v1/settings", h.UpdateSettings)
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/v1/settings", strings.NewReader("{bad json}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAdminConfigHandler_UploadQRCode_MissingFields(t *testing.T) {
+	h := NewAdminConfigHandler(makeAdminConfigSvc(nil))
+	r := testRouter()
+	r.POST("/admin/v1/settings/qrcode", h.UploadQRCode)
+
+	// Missing image_base64 field.
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/settings/qrcode", strings.NewReader(`{"type":"alipay"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAdminConfigHandler_UploadQRCode_UnknownType(t *testing.T) {
+	h := NewAdminConfigHandler(makeAdminConfigSvc(nil))
+	r := testRouter()
+	r.POST("/admin/v1/settings/qrcode", h.UploadQRCode)
+
+	validB64 := base64.StdEncoding.EncodeToString([]byte("fake image"))
+	body := `{"type":"paypal","image_base64":"` + validB64 + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/settings/qrcode", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAdminConfigHandler_UploadQRCode_ChannelType(t *testing.T) {
+	h := NewAdminConfigHandler(makeAdminConfigSvc(nil))
+	r := testRouter()
+	r.POST("/admin/v1/settings/qrcode", h.UploadQRCode)
+
+	validB64 := base64.StdEncoding.EncodeToString([]byte("channel promo image"))
+	body := `{"type":"channel","image_base64":"` + validB64 + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/settings/qrcode", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+}

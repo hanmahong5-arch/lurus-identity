@@ -180,3 +180,17 @@ func TestAdminAuth_LurusToken_Rejected(t *testing.T) {
 		t.Errorf("status = %d, want 401 or 403 (lurus token must not pass AdminAuth)", w.Code)
 	}
 }
+
+func TestSafeTokenPrefix_ShortToken(t *testing.T) {
+	// covers len(token) <= 16 branch
+	got := safeTokenPrefix("abc")
+	if got == "" {
+		t.Error("expected non-empty result for short token")
+	}
+	// ensure the long-token path is also exercised
+	long := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.long"
+	got2 := safeTokenPrefix(long)
+	if len(got2) == 0 {
+		t.Error("expected non-empty result for long token")
+	}
+}

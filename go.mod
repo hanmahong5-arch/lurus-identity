@@ -18,6 +18,15 @@ require (
 )
 
 require (
+	github.com/aliyun/alibaba-cloud-sdk-go v1.63.107 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.53 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sms v1.1.49 // indirect
+	gopkg.in/ini.v1 v1.67.0 // indirect
+)
+
+require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/sonic v1.12.3 // indirect

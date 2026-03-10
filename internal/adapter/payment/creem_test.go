@@ -305,3 +305,26 @@ func (t *redirectTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	newReq.Host = u.URL.Host
 	return http.DefaultTransport.RoundTrip(newReq)
 }
+
+
+// failTransport always returns an error, simulating total network failure.
+type failTransport struct{}
+
+func (ft *failTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("connection refused")
+}
+
+// TestCreemProvider_CreateCheckout_HTTP_Error verifies error returned on network failure.
+func TestCreemProvider_CreateCheckout_HTTP_Error(t *testing.T) {
+	p := &CreemProvider{
+		apiKey:        "sk_test",
+		webhookSecret: "whsec_test",
+		httpClient:    &http.Client{Transport: &failTransport{}},
+	}
+
+	order := &entity.PaymentOrder{OrderNo: "LO-NET-ERR", AmountCNY: 10.0, AccountID: 1}
+	_, _, err := p.CreateCheckout(context.Background(), order, "https://return.example.com")
+	if err == nil {
+		t.Error("expected error when HTTP transport fails")
+	}
+}

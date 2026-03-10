@@ -520,3 +520,117 @@ func TestOrgService_UpdateStatus(t *testing.T) {
 		t.Fatalf("UpdateStatus: %v", err)
 	}
 }
+
+// TestOrgService_Create_DuplicateSlug verifies that creating two orgs with the same slug returns an error.
+func TestOrgService_Create_DuplicateSlug(t *testing.T) {
+	svc, _ := makeSvc()
+	ctx := context.Background()
+
+	if _, err := svc.Create(ctx, "First Org", "shared-slug", 1); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	if _, err := svc.Create(ctx, "Second Org", "shared-slug", 2); err == nil {
+		t.Error("expected error on duplicate slug, got nil")
+	}
+}
+
+// TestOrgService_AddMember_Success verifies that an owner can successfully add a new member.
+func TestOrgService_AddMember_Success(t *testing.T) {
+	svc, store := makeSvc()
+	ctx := context.Background()
+	ownerID := int64(1)
+	newMemberID := int64(99)
+
+	org := seedOrg(t, svc, ownerID)
+
+	if err := svc.AddMember(ctx, org.ID, ownerID, newMemberID, "member"); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	mem, _ := store.GetMember(ctx, org.ID, newMemberID)
+	if mem == nil || mem.Role != "member" {
+		t.Errorf("expected new member with role=member, got %v", mem)
+	}
+}
+
+// TestOrgService_RemoveMember_NotAuthorized verifies that a regular member cannot remove others.
+func TestOrgService_RemoveMember_NotAuthorized(t *testing.T) {
+	svc, store := makeSvc()
+	ctx := context.Background()
+	ownerID := int64(1)
+	regularID := int64(2)
+	victimID := int64(3)
+
+	org := seedOrg(t, svc, ownerID)
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: org.ID, AccountID: regularID, Role: "member"})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: org.ID, AccountID: victimID, Role: "member"})
+
+	err := svc.RemoveMember(ctx, org.ID, regularID, victimID)
+	if err == nil {
+		t.Error("expected permission denied error, got nil")
+	}
+}
+
+// TestOrgService_RemoveMember_TargetNotFound verifies that removing a non-member returns an error.
+func TestOrgService_RemoveMember_TargetNotFound(t *testing.T) {
+	svc, _ := makeSvc()
+	ctx := context.Background()
+	ownerID := int64(1)
+
+	org := seedOrg(t, svc, ownerID)
+
+	// Target 999 is not a member.
+	err := svc.RemoveMember(ctx, org.ID, ownerID, 999)
+	if err == nil {
+		t.Error("expected 'member not found' error, got nil")
+	}
+}
+
+// TestOrgService_RemoveMember_Success verifies that an owner can remove a regular member.
+func TestOrgService_RemoveMember_Success(t *testing.T) {
+	svc, store := makeSvc()
+	ctx := context.Background()
+	ownerID := int64(1)
+	memberID := int64(5)
+
+	org := seedOrg(t, svc, ownerID)
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: org.ID, AccountID: memberID, Role: "member"})
+
+	if err := svc.RemoveMember(ctx, org.ID, ownerID, memberID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	mem, _ := store.GetMember(ctx, org.ID, memberID)
+	if mem != nil {
+		t.Error("expected member to be removed, but still present")
+	}
+}
+
+// errGetMemberOrgStore returns an error from GetMember to cover the RevokeAPIKey db-error branch.
+type errGetMemberOrgStore struct{ mockOrgStore }
+
+func (s *errGetMemberOrgStore) GetMember(_ context.Context, _, _ int64) (*entity.OrgMember, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// TestOrgService_RevokeAPIKey_GetMemberError covers the GetMember error branch in RevokeAPIKey.
+func TestOrgService_RevokeAPIKey_GetMemberError(t *testing.T) {
+	store := &errGetMemberOrgStore{*newMockOrgStore()}
+	svc := NewOrganizationService(store)
+
+	err := svc.RevokeAPIKey(context.Background(), 1, 1, 1)
+	if err == nil {
+		t.Fatal("expected error from GetMember, got nil")
+	}
+}
+
+// TestOrgService_CreateAPIKey_GetMemberError covers the GetMember error branch in CreateAPIKey.
+func TestOrgService_CreateAPIKey_GetMemberError(t *testing.T) {
+	store := &errGetMemberOrgStore{*newMockOrgStore()}
+	svc := NewOrganizationService(store)
+
+	_, _, err := svc.CreateAPIKey(context.Background(), 1, 1, "test-key")
+	if err == nil {
+		t.Fatal("expected error from GetMember, got nil")
+	}
+}

@@ -176,6 +176,78 @@ spec:
                   name: lurus-identity-secrets
                   key: NEWAPI_ADMIN_USER_ID
                   optional: true
+            - name: SMS_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_PROVIDER
+                  optional: true
+            - name: SMS_TENCENT_SECRET_ID
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_SECRET_ID
+                  optional: true
+            - name: SMS_TENCENT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_SECRET_KEY
+                  optional: true
+            - name: SMS_TENCENT_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_APP_ID
+                  optional: true
+            - name: SMS_TENCENT_SIGN_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_SIGN_NAME
+                  optional: true
+            - name: SMS_TENCENT_TEMPLATE_ID_VERIFY
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_TEMPLATE_ID_VERIFY
+                  optional: true
+            - name: SMS_TENCENT_TEMPLATE_ID_RESET
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_TENCENT_TEMPLATE_ID_RESET
+                  optional: true
+            - name: SMS_ALIYUN_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_ALIYUN_ACCESS_KEY_ID
+                  optional: true
+            - name: SMS_ALIYUN_ACCESS_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_ALIYUN_ACCESS_KEY_SECRET
+                  optional: true
+            - name: SMS_ALIYUN_SIGN_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_ALIYUN_SIGN_NAME
+                  optional: true
+            - name: SMS_ALIYUN_TEMPLATE_CODE_VERIFY
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_ALIYUN_TEMPLATE_CODE_VERIFY
+                  optional: true
+            - name: SMS_ALIYUN_TEMPLATE_CODE_RESET
+              valueFrom:
+                secretKeyRef:
+                  name: lurus-identity-secrets
+                  key: SMS_ALIYUN_TEMPLATE_CODE_RESET
+                  optional: true
           resources:
             requests:
               memory: "128Mi"

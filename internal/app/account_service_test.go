@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
 
 func TestGenerateAffCode(t *testing.T) {
@@ -257,5 +260,137 @@ func TestAccountService_GetByOAuthBinding_Delegates(t *testing.T) {
 	}
 	if got.ID != a.ID {
 		t.Errorf("got account ID %d, want %d", got.ID, a.ID)
+	}
+}
+
+// TestAccountService_GetByEmail_Delegates verifies GetByEmail delegates to the store.
+func TestAccountService_GetByEmail_Delegates(t *testing.T) {
+	svc := makeAccountService()
+	ctx := context.Background()
+
+	// Register an account so the email is in the store.
+	a, err := svc.UpsertByZitadelSub(ctx, "sub-email-test", "getbyemail@example.com", "Tester", "")
+	if err != nil {
+		t.Fatalf("UpsertByZitadelSub: %v", err)
+	}
+
+	got, err := svc.GetByEmail(ctx, "getbyemail@example.com")
+	if err != nil {
+		t.Fatalf("GetByEmail: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil account")
+	}
+	if got.ID != a.ID {
+		t.Errorf("ID = %d, want %d", got.ID, a.ID)
+	}
+}
+
+// TestAccountService_GetByEmail_NotFound verifies nil is returned for unknown email.
+func TestAccountService_GetByEmail_NotFound(t *testing.T) {
+	svc := makeAccountService()
+
+	got, err := svc.GetByEmail(context.Background(), "nobody@example.com")
+	if err != nil {
+		t.Fatalf("GetByEmail: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for unknown email")
+	}
+}
+
+// TestAccountService_GetByPhone_Delegates verifies GetByPhone delegates to the store.
+func TestAccountService_GetByPhone_Delegates(t *testing.T) {
+	svc := makeAccountService()
+	ctx := context.Background()
+
+	// Seed account with a phone number.
+	a, err := svc.UpsertByZitadelSub(ctx, "sub-phone-test", "phoneuser@example.com", "PhoneUser", "")
+	if err != nil {
+		t.Fatalf("UpsertByZitadelSub: %v", err)
+	}
+	a.Phone = "+8613800138000"
+	_ = svc.Update(ctx, a)
+
+	got, err := svc.GetByPhone(ctx, "+8613800138000")
+	if err != nil {
+		t.Fatalf("GetByPhone: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil account")
+	}
+	if got.ID != a.ID {
+		t.Errorf("ID = %d, want %d", got.ID, a.ID)
+	}
+}
+
+// TestAccountService_GetByPhone_NotFound verifies nil is returned for unknown phone.
+func TestAccountService_GetByPhone_NotFound(t *testing.T) {
+	svc := makeAccountService()
+
+	got, err := svc.GetByPhone(context.Background(), "+0000000000")
+	if err != nil {
+		t.Fatalf("GetByPhone: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for unknown phone")
+	}
+}
+
+// TestAccountService_GetByAffCode_Delegates verifies GetByAffCode delegates to the store.
+func TestAccountService_GetByAffCode_Delegates(t *testing.T) {
+	svc := makeAccountService()
+	ctx := context.Background()
+
+	a, err := svc.UpsertByZitadelSub(ctx, "sub-aff-test", "affuser@example.com", "AffUser", "")
+	if err != nil {
+		t.Fatalf("UpsertByZitadelSub: %v", err)
+	}
+
+	// AffCode is auto-generated on first upsert.
+	if a.AffCode == "" {
+		t.Skip("AffCode not populated, skipping")
+	}
+
+	got, err := svc.GetByAffCode(ctx, a.AffCode)
+	if err != nil {
+		t.Fatalf("GetByAffCode: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil account")
+	}
+	if got.ID != a.ID {
+		t.Errorf("ID = %d, want %d", got.ID, a.ID)
+	}
+}
+
+// TestAccountService_GetByAffCode_NotFound verifies nil is returned for unknown affcode.
+func TestAccountService_GetByAffCode_NotFound(t *testing.T) {
+	svc := makeAccountService()
+
+	got, err := svc.GetByAffCode(context.Background(), "nonexistent-aff")
+	if err != nil {
+		t.Fatalf("GetByAffCode: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for unknown aff code")
+	}
+}
+
+// errOAuthBindingStore returns an error from GetByOAuthBinding to cover the UpsertByWechat error branch.
+type errOAuthBindingStore struct{ mockAccountStore }
+
+func (s *errOAuthBindingStore) GetByOAuthBinding(_ context.Context, _, _ string) (*entity.Account, error) {
+	return nil, fmt.Errorf("oauth db error")
+}
+
+// TestAccountService_UpsertByWechat_OAuthBindingError covers the GetByOAuthBinding error branch.
+func TestAccountService_UpsertByWechat_OAuthBindingError(t *testing.T) {
+	errStore := &errOAuthBindingStore{*newMockAccountStore()}
+	svc := NewAccountService(errStore, newMockWalletStore(), newMockVIPStore(nil))
+
+	_, err := svc.UpsertByWechat(context.Background(), "wx-err-test")
+	if err == nil {
+		t.Fatal("expected error from GetByOAuthBinding, got nil")
 	}
 }

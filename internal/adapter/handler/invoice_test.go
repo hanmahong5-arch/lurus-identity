@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +12,19 @@ import (
 	"github.com/hanmahong5-arch/lurus-identity/internal/app"
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
+
+// errInvoiceStore returns errors from list methods to exercise error paths.
+type errInvoiceStore struct {
+	mockInvoiceStore
+}
+
+func (s *errInvoiceStore) ListByAccount(_ context.Context, _ int64, _, _ int) ([]entity.Invoice, int64, error) {
+	return nil, 0, fmt.Errorf("db unavailable")
+}
+
+func (s *errInvoiceStore) AdminList(_ context.Context, _ int64, _, _ int) ([]entity.Invoice, int64, error) {
+	return nil, 0, fmt.Errorf("db unavailable")
+}
 
 func makeInvoiceServiceWithPaidOrder(accountID int64, orderNo string) *app.InvoiceService {
 	ws := newMockWalletStore()
@@ -136,5 +151,33 @@ func TestInvoiceHandler_AdminList(t *testing.T) {
 				t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 			}
 		})
+	}
+}
+
+func TestInvoiceHandler_ListInvoices_Error(t *testing.T) {
+	svc := app.NewInvoiceService(&errInvoiceStore{}, newMockWalletStore())
+	h := NewInvoiceHandler(svc)
+	r := testRouter()
+	r.GET("/api/v1/invoices", withAccountID(1), h.ListInvoices)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/invoices", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInvoiceHandler_AdminList_InternalError(t *testing.T) {
+	svc := app.NewInvoiceService(&errInvoiceStore{}, newMockWalletStore())
+	h := NewInvoiceHandler(svc)
+	r := testRouter()
+	r.GET("/admin/v1/invoices", h.AdminList)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/v1/invoices", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
 	}
 }

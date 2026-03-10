@@ -29,6 +29,8 @@ func TestTableNames(t *testing.T) {
 		{"OrgAPIKey", entity.OrgAPIKey{}, "identity.org_api_keys"},
 		{"OrgWallet", entity.OrgWallet{}, "billing.org_wallets"},
 		{"AdminSetting", entity.AdminSetting{}, "admin.settings"},
+		{"Checkin", entity.Checkin{}, "identity.checkins"},
+		{"OutboxEvent", entity.OutboxEvent{}, "identity.outbox_events"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

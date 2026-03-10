@@ -2,11 +2,26 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
+
+// mockReferralStatsStore implements referralStatsStore for testing.
+type mockReferralStatsStore struct {
+	referrals  int
+	rewardedLB float64
+	err        error
+}
+
+func (m *mockReferralStatsStore) GetReferralStats(_ context.Context, _ int64) (int, float64, error) {
+	if m.err != nil {
+		return 0, 0, m.err
+	}
+	return m.referrals, m.rewardedLB, nil
+}
 
 // approxEqual returns true if |a - b| < epsilon.
 func approxEqual(a, b, epsilon float64) bool {
@@ -157,5 +172,45 @@ func TestReferralRewardConstants(t *testing.T) {
 	}
 	if RewardRenewalRate != 0.05 {
 		t.Errorf("RewardRenewalRate = %.3f, want 0.05", RewardRenewalRate)
+	}
+}
+
+// TestReferralService_WithStats_SetsStore verifies WithStats configures the stats store.
+func TestReferralService_WithStats_SetsStore(t *testing.T) {
+	svc := NewReferralService(newMockAccountStore(), newMockWalletStore())
+
+	// Before WithStats: GetStats returns (0, 0, nil) because stats is nil.
+	total, rewardedLB, err := svc.GetStats(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetStats (nil stats): %v", err)
+	}
+	if total != 0 || rewardedLB != 0 {
+		t.Errorf("nil stats: got (%d, %.2f), want (0, 0)", total, rewardedLB)
+	}
+
+	// After WithStats: GetStats delegates to the store.
+	mockStats := &mockReferralStatsStore{referrals: 3, rewardedLB: 15.5}
+	svc.WithStats(mockStats)
+
+	total2, rewardedLB2, err2 := svc.GetStats(context.Background(), 1)
+	if err2 != nil {
+		t.Fatalf("GetStats (with stats): %v", err2)
+	}
+	if total2 != 3 {
+		t.Errorf("totalReferrals = %d, want 3", total2)
+	}
+	if rewardedLB2 != 15.5 {
+		t.Errorf("totalRewardedLB = %.2f, want 15.5", rewardedLB2)
+	}
+}
+
+// TestReferralService_GetStats_StoreError propagates errors from the stats store.
+func TestReferralService_GetStats_StoreError(t *testing.T) {
+	svc := NewReferralService(newMockAccountStore(), newMockWalletStore())
+	svc.WithStats(&mockReferralStatsStore{err: fmt.Errorf("db error")})
+
+	_, _, err := svc.GetStats(context.Background(), 1)
+	if err == nil {
+		t.Error("expected error from stats store, got nil")
 	}
 }

@@ -92,6 +92,16 @@ func (s *AccountService) GetByID(ctx context.Context, id int64) (*entity.Account
 	return s.accounts.GetByID(ctx, id)
 }
 
+// GetByEmail returns an account by email address.
+func (s *AccountService) GetByEmail(ctx context.Context, email string) (*entity.Account, error) {
+	return s.accounts.GetByEmail(ctx, email)
+}
+
+// GetByPhone returns an account by phone number.
+func (s *AccountService) GetByPhone(ctx context.Context, phone string) (*entity.Account, error) {
+	return s.accounts.GetByPhone(ctx, phone)
+}
+
 // GetByZitadelSub returns an account by Zitadel OIDC sub.
 func (s *AccountService) GetByZitadelSub(ctx context.Context, sub string) (*entity.Account, error) {
 	return s.accounts.GetByZitadelSub(ctx, sub)

@@ -70,6 +70,24 @@ func (r *AccountRepo) GetByAffCode(ctx context.Context, code string) (*entity.Ac
 	return &a, err
 }
 
+func (r *AccountRepo) GetByUsername(ctx context.Context, username string) (*entity.Account, error) {
+	var a entity.Account
+	err := r.db.WithContext(ctx).Where("lower(username) = lower(?)", username).First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &a, err
+}
+
+func (r *AccountRepo) GetByPhone(ctx context.Context, phone string) (*entity.Account, error) {
+	var a entity.Account
+	err := r.db.WithContext(ctx).Where("phone = ? AND phone != ''", phone).First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &a, err
+}
+
 // List returns paginated accounts with optional keyword filter on email/display_name.
 func (r *AccountRepo) List(ctx context.Context, keyword string, page, pageSize int) ([]*entity.Account, int64, error) {
 	var accounts []*entity.Account

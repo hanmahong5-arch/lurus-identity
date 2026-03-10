@@ -30,6 +30,11 @@ func (s *WalletService) GetWallet(ctx context.Context, accountID int64) (*entity
 	return s.wallets.GetOrCreate(ctx, accountID)
 }
 
+// GetBalance returns the wallet for balance lookup (alias for GetWallet, read-only intent).
+func (s *WalletService) GetBalance(ctx context.Context, accountID int64) (*entity.Wallet, error) {
+	return s.wallets.GetByAccountID(ctx, accountID)
+}
+
 // Topup credits the wallet and triggers a VIP recalculation.
 func (s *WalletService) Topup(ctx context.Context, accountID int64, amountCNY float64, orderNo string) (*entity.WalletTransaction, error) {
 	tx, err := s.wallets.Credit(ctx, accountID, amountCNY,

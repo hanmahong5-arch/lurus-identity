@@ -8,6 +8,8 @@ import RedeemPage from './pages/Redeem'
 import AdminPage from './pages/Admin'
 import CallbackPage from './pages/Callback'
 import LoginPage from './pages/Login'
+import RegisterPage from './pages/Register'
+import ForgotPasswordPage from './pages/ForgotPassword'
 import ZLoginPage from './pages/ZLogin'
 import HubPage from './pages/Hub'
 import { useStore } from './store'
@@ -32,7 +34,7 @@ export default function App() {
     // Skip init on auth pages — /callback hasn't stored the token yet,
     // and /login + /zlogin don't need API data.
     const path = window.location.pathname
-    if (['/callback', '/login', '/zlogin'].includes(path)) return
+    if (['/callback', '/login', '/register', '/forgot-password', '/zlogin'].includes(path)) return
     if (isLoggedIn()) init()
   }, [])
 
@@ -41,6 +43,8 @@ export default function App() {
       <Routes>
         {/* Auth pages — outside Layout, no auth required */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/callback" element={<CallbackPage />} />
         {/* Custom Zitadel OIDC login UI — no auth, no layout wrapper */}
         <Route path="/zlogin" element={<ZLoginPage />} />

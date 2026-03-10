@@ -6,17 +6,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hanmahong5-arch/lurus-identity/internal/app"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/auth"
 )
+
+// validateSessionTokenFn is a package-level reference to auth.ValidateSessionToken
+// so InternalHandler can validate tokens without importing the auth middleware directly.
+var validateSessionTokenFn = auth.ValidateSessionToken
 
 // InternalHandler serves /internal/v1/* endpoints for service-to-service calls.
 type InternalHandler struct {
-	accounts     *app.AccountService
-	subs         *app.SubscriptionService
-	entitlements *app.EntitlementService
-	vip          *app.VIPService
-	overview     *app.OverviewService
-	wallet       *app.WalletService
-	referral     *app.ReferralService
+	accounts      *app.AccountService
+	subs          *app.SubscriptionService
+	entitlements  *app.EntitlementService
+	vip           *app.VIPService
+	overview      *app.OverviewService
+	wallet        *app.WalletService
+	referral      *app.ReferralService
+	sessionSecret string
 }
 
 func NewInternalHandler(
@@ -27,15 +33,17 @@ func NewInternalHandler(
 	overview *app.OverviewService,
 	wallet *app.WalletService,
 	referral *app.ReferralService,
+	sessionSecret string,
 ) *InternalHandler {
 	return &InternalHandler{
-		accounts:     accounts,
-		subs:         subs,
-		entitlements: ents,
-		vip:          vip,
-		overview:     overview,
-		wallet:       wallet,
-		referral:     referral,
+		accounts:      accounts,
+		subs:          subs,
+		entitlements:  ents,
+		vip:           vip,
+		overview:      overview,
+		wallet:        wallet,
+		referral:      referral,
+		sessionSecret: sessionSecret,
 	}
 }
 
@@ -208,6 +216,81 @@ func (h *InternalHandler) DebitWallet(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "balance_after": tx.BalanceAfter})
+}
+
+// GetAccountByEmail looks up an account by email address.
+// GET /internal/v1/accounts/by-email/:email
+func (h *InternalHandler) GetAccountByEmail(c *gin.Context) {
+	email := c.Param("email")
+	a, err := h.accounts.GetByEmail(c.Request.Context(), email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+	if a == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, a)
+}
+
+// GetAccountByPhone looks up an account by phone number.
+// GET /internal/v1/accounts/by-phone/:phone
+func (h *InternalHandler) GetAccountByPhone(c *gin.Context) {
+	phone := c.Param("phone")
+	a, err := h.accounts.GetByPhone(c.Request.Context(), phone)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+	if a == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, a)
+}
+
+// GetWalletBalance returns the wallet balance for an account (quick lookup).
+// GET /internal/v1/accounts/:id/wallet/balance
+func (h *InternalHandler) GetWalletBalance(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account id"})
+		return
+	}
+	w, err := h.wallet.GetBalance(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "balance lookup failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"balance": w.Balance, "frozen": w.Frozen})
+}
+
+// ValidateSession validates a lurus session token and returns the associated account.
+// POST /internal/v1/accounts/validate-session
+func (h *InternalHandler) ValidateSession(c *gin.Context) {
+	var req struct {
+		Token string `json:"token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.sessionSecret == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "session validation not configured"})
+		return
+	}
+	accountID, err := validateSessionTokenFn(req.Token, h.sessionSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid session token"})
+		return
+	}
+	a, err := h.accounts.GetByID(c.Request.Context(), accountID)
+	if err != nil || a == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, a)
 }
 
 // CreditWallet adds LB to an account wallet (e.g. marketplace author revenue).

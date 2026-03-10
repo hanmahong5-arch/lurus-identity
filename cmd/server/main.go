@@ -36,9 +36,11 @@ import (
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/config"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/email"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/idempotency"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/sms"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/metrics"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/ratelimit"
 	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/tracing"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/zitadel"
 	lurusweb "github.com/hanmahong5-arch/lurus-identity/web"
 )
 
@@ -141,6 +143,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	// --- Repositories (extended) ---
 	referralRepo := repo.NewReferralRepo(db)
 
+	// --- Repositories (checkin) ---
+	checkinRepo := repo.NewCheckinRepo(db)
+
 	// --- App Services ---
 	vipSvc := app.NewVIPService(vipRepo, walletRepo)
 	walletSvc := app.NewWalletService(walletRepo, vipSvc)
@@ -152,6 +157,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo).WithStats(referralRepo)
 	orgSvc := app.NewOrganizationService(orgRepo)
 	overviewSvc := app.NewOverviewService(accountRepo, vipSvc, walletRepo, subSvc, productRepo, ovCache)
+	checkinSvc := app.NewCheckinService(checkinRepo, walletRepo)
 
 	// --- NATS Publisher ---
 	publisher, err := identitynats.NewPublisher(nc)
@@ -200,12 +206,31 @@ func run(ctx context.Context, cfg *config.Config) error {
 	// --- Webhook Idempotency Deduper ---
 	webhookDeduper := idempotency.New(rdb, 24*time.Hour)
 
+	// --- Email Sender (needed by registration service, must be initialized before handlers) ---
+	var emailSender email.Sender
+	if cfg.EmailSMTPHost != "" {
+		emailSender = email.NewSMTPSender(cfg.EmailSMTPHost, cfg.EmailSMTPPort, cfg.EmailSMTPUser, cfg.EmailSMTPPass, cfg.EmailFrom)
+	} else {
+		emailSender = email.NoopSender{}
+	}
+
+	// --- SMS Sender ---
+	smsCfg := sms.LoadFromEnv()
+	smsSender, err := sms.NewFromConfig(smsCfg)
+	if err != nil {
+		return fmt.Errorf("init sms sender: %w", err)
+	}
+
+	// --- Zitadel Client + Registration Service ---
+	zitadelClient := zitadel.NewClient(cfg.ZitadelIssuer, cfg.ZitadelServiceAccountPAT)
+	registrationSvc := app.NewRegistrationService(accountRepo, walletRepo, vipRepo, referralSvc, zitadelClient, cfg.SessionSecret, emailSender, smsSender, rdb, smsCfg)
+
 	// --- HTTP Handlers ---
 	accountH := handler.NewAccountHandler(accountSvc, vipSvc, subSvc, overviewSvc, referralSvc)
 	subH := handler.NewSubscriptionHandler(subSvc, productSvc, walletSvc, epayProvider, stripeProvider, creemProvider)
 	walletH := handler.NewWalletHandler(walletSvc, epayProvider, stripeProvider, creemProvider)
 	productH := handler.NewProductHandler(productSvc)
-	internalH := handler.NewInternalHandler(accountSvc, subSvc, entSvc, vipSvc, overviewSvc, walletSvc, referralSvc)
+	internalH := handler.NewInternalHandler(accountSvc, subSvc, entSvc, vipSvc, overviewSvc, walletSvc, referralSvc, cfg.SessionSecret)
 	webhookH := handler.NewWebhookHandler(walletSvc, subSvc, epayProvider, stripeProvider, creemProvider, webhookDeduper)
 	invoiceH := handler.NewInvoiceHandler(invoiceSvc)
 	refundH := handler.NewRefundHandler(refundSvc)
@@ -214,7 +239,9 @@ func run(ctx context.Context, cfg *config.Config) error {
 	adminConfigH := handler.NewAdminConfigHandler(adminConfigSvc)
 	wechatAuthH  := handler.NewWechatAuthHandler(accountSvc, cfg.WechatServerAddress, cfg.WechatServerToken, cfg.SessionSecret)
 	wechatOAuthH := handler.NewWechatOAuthHandler(cfg.WechatServerAddress, cfg.WechatServerToken, cfg.WechatOAuthClientSecret, rdb)
-	zloginH      := handler.NewZLoginHandler(accountSvc, cfg.ZitadelIssuer, cfg.ZitadelServiceAccountPAT, cfg.SessionSecret)
+	zloginH      := handler.NewZLoginHandler(accountSvc, accountRepo, cfg.ZitadelIssuer, cfg.ZitadelServiceAccountPAT, cfg.SessionSecret)
+	registrationH := handler.NewRegistrationHandler(registrationSvc)
+	checkinH     := handler.NewCheckinHandler(checkinSvc)
 	orgH         := handler.NewOrganizationHandler(orgSvc)
 
 	// --- NewAPI Admin Proxy (optional) ---
@@ -244,6 +271,8 @@ func run(ctx context.Context, cfg *config.Config) error {
 		WechatAuth:    wechatAuthH,
 		WechatOAuth:   wechatOAuthH,
 		ZLogin:        zloginH,
+		Registration:  registrationH,
+		Checkin:       checkinH,
 		Organizations: orgH,
 		NewAPIProxy:   newAPIProxyH,
 		InternalKey:   cfg.InternalAPIKey,
@@ -290,14 +319,6 @@ func run(ctx context.Context, cfg *config.Config) error {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
-	}
-
-	// --- Email Sender ---
-	var emailSender email.Sender
-	if cfg.EmailSMTPHost != "" {
-		emailSender = email.NewSMTPSender(cfg.EmailSMTPHost, cfg.EmailSMTPPort, cfg.EmailSMTPUser, cfg.EmailSMTPPass, cfg.EmailFrom)
-	} else {
-		emailSender = email.NoopSender{}
 	}
 
 	// --- Cron Jobs ---

@@ -58,6 +58,8 @@ func (h *AccountHandler) UpdateMe(c *gin.Context) {
 	}
 	var req struct {
 		DisplayName string `json:"display_name"`
+		AvatarURL   string `json:"avatar_url"`
+		Username    string `json:"username"`
 		Locale      string `json:"locale"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -66,6 +68,12 @@ func (h *AccountHandler) UpdateMe(c *gin.Context) {
 	}
 	if req.DisplayName != "" {
 		a.DisplayName = req.DisplayName
+	}
+	if req.AvatarURL != "" {
+		a.AvatarURL = req.AvatarURL
+	}
+	if req.Username != "" {
+		a.Username = req.Username
 	}
 	if req.Locale != "" {
 		a.Locale = req.Locale

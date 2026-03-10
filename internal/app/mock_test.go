@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +112,30 @@ func (m *mockAccountStore) GetByAffCode(_ context.Context, code string) (*entity
 	defer m.mu.Unlock()
 	for _, a := range m.byID {
 		if a.AffCode == code {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAccountStore) GetByUsername(_ context.Context, username string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if strings.EqualFold(a.Username, username) && username != "" {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAccountStore) GetByPhone(_ context.Context, phone string) (*entity.Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.byID {
+		if a.Phone == phone && phone != "" {
 			cp := *a
 			return &cp, nil
 		}
@@ -847,4 +872,83 @@ func (m *mockCache) Invalidate(_ context.Context, accountID int64, productID str
 	defer m.mu.Unlock()
 	delete(m.data, fmt.Sprintf("%d:%s", accountID, productID))
 	return nil
+}
+
+// ── checkinStore mock ─────────────────────────────────────────────────────────
+
+type mockCheckinStore struct {
+	mu      sync.Mutex
+	checkins []entity.Checkin
+	nextID  int64
+	createErr error // if non-nil, Create returns this error
+}
+
+func newMockCheckinStore() *mockCheckinStore {
+	return &mockCheckinStore{nextID: 1}
+}
+
+func (m *mockCheckinStore) Create(_ context.Context, c *entity.Checkin) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.createErr != nil {
+		return m.createErr
+	}
+	c.ID = m.nextID
+	m.nextID++
+	cp := *c
+	m.checkins = append(m.checkins, cp)
+	return nil
+}
+
+func (m *mockCheckinStore) GetByAccountAndDate(_ context.Context, accountID int64, date string) (*entity.Checkin, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.checkins {
+		if c.AccountID == accountID && c.CheckinDate == date {
+			cp := c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockCheckinStore) ListByAccountAndMonth(_ context.Context, accountID int64, yearMonth string) ([]entity.Checkin, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []entity.Checkin
+	for _, c := range m.checkins {
+		if c.AccountID == accountID && len(c.CheckinDate) >= 7 && c.CheckinDate[:7] == yearMonth {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// CountConsecutive counts consecutive days ending on 'date' (inclusive).
+func (m *mockCheckinStore) CountConsecutive(_ context.Context, accountID int64, date string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if date == "" {
+		return 0, nil
+	}
+	// Build a set of dates checked in.
+	dateSet := make(map[string]bool)
+	for _, c := range m.checkins {
+		if c.AccountID == accountID {
+			dateSet[c.CheckinDate] = true
+		}
+	}
+	// Count backward from 'date'.
+	count := 0
+	cur := date
+	for dateSet[cur] {
+		count++
+		// Go back one day.
+		t, err := time.Parse("2006-01-02", cur)
+		if err != nil {
+			break
+		}
+		cur = t.AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	return count, nil
 }

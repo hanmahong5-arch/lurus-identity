@@ -2,6 +2,7 @@
 package router
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-contrib/cors"
@@ -24,12 +25,14 @@ type Deps struct {
 	AdminOps      *handler.AdminOpsHandler
 	Reports       *handler.ReportHandler
 	AdminConfig   *handler.AdminConfigHandler
-	WechatAuth    *handler.WechatAuthHandler   // nil when WeChat login is not configured
-	WechatOAuth   *handler.WechatOAuthHandler  // nil when WeChat OAuth2 adapter is not configured
-	ZLogin        *handler.ZLoginHandler       // nil when custom OIDC login is not configured
-	Organizations *handler.OrganizationHandler   // organization management
-	NewAPIProxy   *handler.NewAPIProxyHandler   // nil when newapi proxy is not configured
-	InternalKey   string                        // secret for /internal/* bearer auth
+	WechatAuth    *handler.WechatAuthHandler        // nil when WeChat login is not configured
+	WechatOAuth   *handler.WechatOAuthHandler       // nil when WeChat OAuth2 adapter is not configured
+	ZLogin        *handler.ZLoginHandler            // nil when custom OIDC login is not configured
+	Registration  *handler.RegistrationHandler      // nil when registration is not configured
+	Checkin       *handler.CheckinHandler           // daily check-in
+	Organizations *handler.OrganizationHandler      // organization management
+	NewAPIProxy   *handler.NewAPIProxyHandler       // nil when newapi proxy is not configured
+	InternalKey   string                            // secret for /internal/* bearer auth
 	JWT           *auth.JWTMiddleware
 	RateLimit     *ratelimit.Limiter
 }
@@ -58,6 +61,14 @@ func Build(deps Deps) *gin.Engine {
 		r.GET("/api/v1/auth/info", deps.ZLogin.GetAuthInfo)
 		r.POST("/api/v1/auth/zlogin/password", deps.ZLogin.SubmitPassword)
 		r.POST("/api/v1/auth/wechat/link-oidc", deps.ZLogin.LinkWechatAndComplete)
+	}
+
+	// Registration & password reset — unauthenticated
+	if deps.Registration != nil {
+		r.POST("/api/v1/auth/register", deps.Registration.Register)
+		r.POST("/api/v1/auth/forgot-password", deps.Registration.ForgotPassword)
+		r.POST("/api/v1/auth/reset-password", deps.Registration.ResetPassword)
+		r.POST("/api/v1/auth/send-sms", deps.Registration.SendSMSCode)
 	}
 
 	// WeChat OAuth2 adapter — exposes a standard OAuth2 server wrapping WeChat's proprietary flow.
@@ -119,6 +130,16 @@ func Build(deps Deps) *gin.Engine {
 		v1.GET("/refunds", deps.Refunds.ListRefunds)
 		v1.GET("/refunds/:refund_no", deps.Refunds.GetRefund)
 
+		// Phone verification (requires auth)
+		if deps.Registration != nil {
+			v1.POST("/account/me/send-phone-code", deps.Registration.SendPhoneCode)
+			v1.POST("/account/me/verify-phone", deps.Registration.VerifyPhone)
+		}
+
+		// Daily check-in
+		v1.GET("/checkin/status", deps.Checkin.GetStatus)
+		v1.POST("/checkin", deps.Checkin.DoCheckin)
+
 		// Organizations
 		v1.POST("/organizations", deps.Organizations.Create)
 		v1.GET("/organizations", deps.Organizations.ListMine)
@@ -144,6 +165,13 @@ func Build(deps Deps) *gin.Engine {
 		// Wallet debit/credit for internal service calls (AI quota overage, marketplace revenue)
 		internal.POST("/accounts/:id/wallet/debit", deps.Internal.DebitWallet)
 		internal.POST("/accounts/:id/wallet/credit", deps.Internal.CreditWallet)
+		// Lookup by email or phone
+		internal.GET("/accounts/by-email/:email", deps.Internal.GetAccountByEmail)
+		internal.GET("/accounts/by-phone/:phone", deps.Internal.GetAccountByPhone)
+		// Quick wallet balance lookup
+		internal.GET("/accounts/:id/wallet/balance", deps.Internal.GetWalletBalance)
+		// Session token validation
+		internal.POST("/accounts/validate-session", deps.Internal.ValidateSession)
 		// Lookup by third-party OAuth binding (e.g. wechat openid)
 		internal.GET("/accounts/by-oauth/:provider/:provider_id", deps.Internal.GetAccountByOAuth)
 		// Resolve org API key to organization (used by lurus-api and other services)
@@ -211,11 +239,13 @@ func Build(deps Deps) *gin.Engine {
 }
 
 // internalKeyAuth validates the shared internal service API key.
+// Uses constant-time comparison to prevent timing side-channel attacks.
 func internalKeyAuth(key string) gin.HandlerFunc {
+	expected := "Bearer " + key
 	return func(c *gin.Context) {
 		bearer := c.GetHeader("Authorization")
-		expected := "Bearer " + key
-		if bearer != expected {
+		// constant-time compare prevents timing attacks that could reveal key length or value
+		if subtle.ConstantTimeCompare([]byte(bearer), []byte(expected)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid internal key"})
 			return
 		}

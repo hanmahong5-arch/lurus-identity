@@ -81,3 +81,12 @@ func TestSubjectConstants(t *testing.T) {
 		}
 	}
 }
+
+// TestNewEvent_MarshalError verifies that an unmarshalable payload returns an error.
+func TestNewEvent_MarshalError(t *testing.T) {
+	// channels cannot be marshaled to JSON.
+	_, err := event.NewEvent("test.event", 1, "", "", make(chan int))
+	if err == nil {
+		t.Error("expected marshal error for channel payload, got nil")
+	}
+}

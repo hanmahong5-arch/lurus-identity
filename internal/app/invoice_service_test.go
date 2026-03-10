@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -207,5 +208,24 @@ func TestInvoiceService_AdminList(t *testing.T) {
 	}
 	if total1 != 1 {
 		t.Errorf("expected 1 invoice for acc1, got %d", total1)
+	}
+}
+
+// errInvoiceStore returns an error from GetByInvoiceNo to cover the db-error branch.
+type errInvoiceStore struct{ mockInvoiceStore }
+
+func (s *errInvoiceStore) GetByInvoiceNo(_ context.Context, _ string) (*entity.Invoice, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+// TestInvoiceService_GetByNo_StoreError covers the GetByInvoiceNo error branch.
+func TestInvoiceService_GetByNo_StoreError(t *testing.T) {
+	is := &errInvoiceStore{*newMockInvoiceStore()}
+	ws := newMockWalletStore()
+	svc := NewInvoiceService(is, ws)
+
+	_, err := svc.GetByNo(context.Background(), 1, "INV-DOESNOTMATTER")
+	if err == nil {
+		t.Fatal("expected error from store, got nil")
 	}
 }

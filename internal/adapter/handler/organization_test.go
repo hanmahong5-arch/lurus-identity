@@ -656,3 +656,244 @@ func patchJSON(r http.Handler, path string, body any) *httptest.ResponseRecorder
 	r.ServeHTTP(w, req)
 	return w
 }
+
+// ---------- Additional edge-case tests for invalid-ID paths ----------
+
+func TestOrgHandler_Create_ServiceError(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations", h.Create)
+
+	// Slug too short → service validation error → 400.
+	w := postJSON(r, "/organizations", map[string]string{"name": "X", "slug": "ab"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid slug)", w.Code)
+	}
+}
+
+func TestOrgHandler_AddMember_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations/:id/members", h.AddMember)
+
+	w := postJSON(r, "/organizations/bad/members", map[string]any{"account_id": 2})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_AddMember_Forbidden(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org", Slug: "org-af", Status: "active", Plan: "free", OwnerAccountID: 1})
+	_ = store.AddMember(ctx, &entity.OrgMember{OrgID: 1, AccountID: 1, Role: "owner"})
+
+	r := testRouter()
+	r.Use(withAccountID(99)) // not a member
+	r.POST("/organizations/:id/members", h.AddMember)
+
+	w := postJSON(r, "/organizations/1/members", map[string]any{"account_id": 55})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status=%d, want 403 (non-member cannot add)", w.Code)
+	}
+}
+
+func TestOrgHandler_RemoveMember_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/members/:uid", h.RemoveMember)
+
+	req := httptest.NewRequest(http.MethodDelete, "/organizations/bad/members/2", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_RemoveMember_InvalidUID(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org", Slug: "org-rmuid", Status: "active", Plan: "free", OwnerAccountID: 1})
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/members/:uid", h.RemoveMember)
+
+	req := httptest.NewRequest(http.MethodDelete, "/organizations/1/members/bad", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid uid)", w.Code)
+	}
+}
+
+func TestOrgHandler_ListAPIKeys_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.GET("/organizations/:id/api-keys", h.ListAPIKeys)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/bad/api-keys", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_CreateAPIKey_MissingName(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	svc := app.NewOrganizationService(store)
+	org, _ := svc.Create(ctx, "Org", "org-ck-noname", 1)
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations/:id/api-keys", h.CreateAPIKey)
+
+	w := postJSON(r, fmt.Sprintf("/organizations/%d/api-keys", org.ID), map[string]any{})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (missing name)", w.Code)
+	}
+}
+
+func TestOrgHandler_CreateAPIKey_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.POST("/organizations/:id/api-keys", h.CreateAPIKey)
+
+	w := postJSON(r, "/organizations/bad/api-keys", map[string]string{"name": "k"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_RevokeAPIKey_InvalidKeyID(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	svc := app.NewOrganizationService(store)
+	org, _ := svc.Create(ctx, "Org", "org-revkey-kid", 1)
+
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/api-keys/:kid", h.RevokeAPIKey)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/organizations/%d/api-keys/bad", org.ID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid key id)", w.Code)
+	}
+}
+
+func TestOrgHandler_RevokeAPIKey_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.Use(withAccountID(1))
+	r.DELETE("/organizations/:id/api-keys/:kid", h.RevokeAPIKey)
+
+	req := httptest.NewRequest(http.MethodDelete, "/organizations/bad/api-keys/1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_GetWallet_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.GET("/organizations/:id/wallet", h.GetWallet)
+
+	req := httptest.NewRequest(http.MethodGet, "/organizations/bad/wallet", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_ResolveAPIKey_MissingRawKey(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.POST("/orgs/resolve-api-key", h.ResolveAPIKey)
+
+	w := postJSON(r, "/orgs/resolve-api-key", map[string]any{})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (missing raw_key)", w.Code)
+	}
+}
+
+func TestOrgHandler_AdminUpdateStatus_InvalidOrgID(t *testing.T) {
+	h, _ := makeOrgHandler()
+	r := testRouter()
+	r.PATCH("/admin/organizations/:id", h.AdminUpdateStatus)
+
+	w := patchJSON(r, "/admin/organizations/bad", map[string]string{"status": "active"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (invalid org id)", w.Code)
+	}
+}
+
+func TestOrgHandler_AdminUpdateStatus_MissingStatus(t *testing.T) {
+	h, store := makeOrgHandler()
+	ctx := context.Background()
+	_ = store.Create(ctx, &entity.Organization{Name: "Org", Slug: "org-nostatus", Status: "active", Plan: "free", OwnerAccountID: 1})
+
+	r := testRouter()
+	r.PATCH("/admin/organizations/:id", h.AdminUpdateStatus)
+
+	w := patchJSON(r, "/admin/organizations/1", map[string]any{})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400 (missing status)", w.Code)
+	}
+}
+
+// ---------- error-path tests for OrgHandler ----------
+
+// errListOrgStoreH overrides store list operations to return errors.
+type errListOrgStoreH struct {
+	mockOrgStoreH
+}
+
+func (s *errListOrgStoreH) ListByAccountID(_ context.Context, _ int64) ([]entity.Organization, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+func (s *errListOrgStoreH) ListAll(_ context.Context, _, _ int) ([]entity.Organization, error) {
+	return nil, fmt.Errorf("db error")
+}
+
+func TestOrgHandler_ListMine_Error(t *testing.T) {
+	store := &errListOrgStoreH{*newMockOrgStoreH()}
+	svc := app.NewOrganizationService(store)
+	h := NewOrganizationHandler(svc)
+	r := testRouter()
+	r.GET("/api/v1/organizations", withAccountID(1), h.ListMine)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/organizations", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOrgHandler_AdminList_Error(t *testing.T) {
+	store := &errListOrgStoreH{*newMockOrgStoreH()}
+	svc := app.NewOrganizationService(store)
+	h := NewOrganizationHandler(svc)
+	r := testRouter()
+	r.GET("/admin/v1/organizations", h.AdminList)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/v1/organizations", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}

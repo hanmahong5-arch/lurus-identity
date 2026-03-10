@@ -16,8 +16,10 @@ type accountStore interface {
 	GetByZitadelSub(ctx context.Context, sub string) (*entity.Account, error)
 	GetByLurusID(ctx context.Context, lurusID string) (*entity.Account, error)
 	GetByAffCode(ctx context.Context, code string) (*entity.Account, error)
+	GetByPhone(ctx context.Context, phone string) (*entity.Account, error)
 	List(ctx context.Context, keyword string, page, pageSize int) ([]*entity.Account, int64, error)
 	UpsertOAuthBinding(ctx context.Context, b *entity.OAuthBinding) error
+	GetByUsername(ctx context.Context, username string) (*entity.Account, error)
 	// GetByOAuthBinding looks up an account via its OAuth provider binding.
 	GetByOAuthBinding(ctx context.Context, provider, providerID string) (*entity.Account, error)
 }

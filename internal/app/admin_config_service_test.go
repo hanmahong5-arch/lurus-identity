@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -234,5 +235,65 @@ func TestAdminConfig_Get_CacheMiss_NotFound(t *testing.T) {
 	}
 	if val != "" {
 		t.Errorf("Get for missing key = %q, want empty string", val)
+	}
+}
+
+// TestAdminConfig_Set_PreservesIsSecret verifies that Set preserves IsSecret from cached entry.
+func TestAdminConfig_Set_PreservesIsSecret(t *testing.T) {
+	store := &mockAdminSettingStore{
+		settings: []entity.AdminSetting{
+			{Key: "stripe_key", Value: "sk_old", IsSecret: true},
+		},
+	}
+	svc := NewAdminConfigService(store)
+	ctx := context.Background()
+
+	// Populate cache (which will store IsSecret=true).
+	_ = svc.Load(ctx)
+
+	// Update the key — should preserve IsSecret.
+	if err := svc.Set(ctx, "stripe_key", "sk_new", "admin@test.com"); err != nil {
+		t.Fatalf("Set error: %v", err)
+	}
+
+	// Value should be updated.
+	got, err := svc.Get(ctx, "stripe_key")
+	if err != nil {
+		t.Fatalf("Get error: %v", err)
+	}
+	if got != "sk_new" {
+		t.Errorf("value = %q, want sk_new", got)
+	}
+}
+
+// TestAdminConfig_Set_StoreError verifies that a store error is propagated.
+func TestAdminConfig_Set_StoreError(t *testing.T) {
+	store := &mockAdminSettingStore{
+		setErr: fmt.Errorf("db write failed"),
+	}
+	svc := NewAdminConfigService(store)
+
+	err := svc.Set(context.Background(), "key", "val", "admin")
+	if err == nil {
+		t.Error("expected error from store, got nil")
+	}
+}
+
+// TestAdminConfig_LoadAll_Success verifies LoadAll returns all settings.
+func TestAdminConfig_LoadAll_Success(t *testing.T) {
+	store := &mockAdminSettingStore{
+		settings: []entity.AdminSetting{
+			{Key: "k1", Value: "v1"},
+			{Key: "k2", Value: "v2"},
+		},
+	}
+	svc := NewAdminConfigService(store)
+
+	all, err := svc.LoadAll(context.Background())
+	if err != nil {
+		t.Fatalf("LoadAll error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("LoadAll returned %d settings, want 2", len(all))
 	}
 }

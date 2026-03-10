@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/app"
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
+	"github.com/hanmahong5-arch/lurus-identity/internal/pkg/auth"
 )
 
 func TestInternalHandler_GetAccountByZitadelSub(t *testing.T) {
@@ -24,6 +26,7 @@ func TestInternalHandler_GetAccountByZitadelSub(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -67,6 +70,7 @@ func TestInternalHandler_UpsertAccount(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -117,6 +121,7 @@ func TestInternalHandler_GetEntitlements(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -160,6 +165,7 @@ func TestInternalHandler_GetSubscription(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -195,6 +201,7 @@ func TestInternalHandler_ReportUsage(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -238,6 +245,7 @@ func TestInternalHandler_DebitWallet(t *testing.T) {
 		nil,
 		walletSvc,
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -326,6 +334,7 @@ func TestInternalHandler_CreditWallet(t *testing.T) {
 		nil,
 		walletSvc,
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -403,6 +412,7 @@ func TestInternalHandler_GetAccountByOAuth(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -440,6 +450,7 @@ func TestInternalHandler_GetAccountOverview(t *testing.T) {
 		makeOverviewServiceWithAccounts(as),
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -491,6 +502,7 @@ func TestInternalHandler_UpsertAccount_WithReferrer(t *testing.T) {
 		nil,
 		makeWalletService(),
 		makeReferralService(),
+		"",
 	)
 
 	r := testRouter()
@@ -529,4 +541,381 @@ func TestInternalHandler_UpsertAccount_WithReferrer(t *testing.T) {
 	})
 
 	_ = referrer
+}
+
+// makeInternalHandler builds an InternalHandler with the given account store.
+func makeInternalHandler(as *mockAccountStore) *InternalHandler {
+	return NewInternalHandler(
+		makeAccountServiceWith(as),
+		makeSubService(),
+		makeEntitlementService(),
+		makeVIPService(),
+		makeOverviewServiceWithAccounts(as),
+		makeWalletService(),
+		makeReferralService(),
+		"",
+	)
+}
+
+// makeInternalHandlerWithSecret builds an InternalHandler with a session secret.
+func makeInternalHandlerWithSecret(as *mockAccountStore, secret string) *InternalHandler {
+	return NewInternalHandler(
+		makeAccountServiceWith(as),
+		makeSubService(),
+		makeEntitlementService(),
+		makeVIPService(),
+		makeOverviewServiceWithAccounts(as),
+		makeWalletService(),
+		makeReferralService(),
+		secret,
+	)
+}
+
+// TestInternalHandler_GetAccountByEmail_NotFound verifies 404 when email is not found.
+func TestInternalHandler_GetAccountByEmail_NotFound(t *testing.T) {
+	as := newMockAccountStore()
+	h := makeInternalHandler(as)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-email/:email", h.GetAccountByEmail)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-email/unknown@example.com", nil)
+	r.ServeHTTP(w, req)
+
+	// mockAccountStore.GetByEmail always returns nil → 404
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestInternalHandler_GetAccountByPhone_Found verifies 200 when phone is found.
+func TestInternalHandler_GetAccountByPhone_Found(t *testing.T) {
+	as := newMockAccountStore()
+	as.seed(entity.Account{Phone: "+8613800138000", Email: "phone@example.com"})
+	h := makeInternalHandler(as)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-phone/:phone", h.GetAccountByPhone)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-phone/+8613800138000", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+// TestInternalHandler_GetAccountByPhone_NotFound verifies 404 when phone is not found.
+func TestInternalHandler_GetAccountByPhone_NotFound(t *testing.T) {
+	as := newMockAccountStore()
+	h := makeInternalHandler(as)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-phone/:phone", h.GetAccountByPhone)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-phone/+10000000000", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestInternalHandler_GetWalletBalance_Success verifies 200 with balance data.
+func TestInternalHandler_GetWalletBalance_Success(t *testing.T) {
+	as := newMockAccountStore()
+	h := makeInternalHandler(as)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/:id/wallet/balance", h.GetWalletBalance)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/1/wallet/balance", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if _, ok := resp["balance"]; !ok {
+		t.Error("response missing 'balance'")
+	}
+}
+
+// TestInternalHandler_GetWalletBalance_BadID verifies 400 for invalid account ID.
+func TestInternalHandler_GetWalletBalance_BadID(t *testing.T) {
+	as := newMockAccountStore()
+	h := makeInternalHandler(as)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/:id/wallet/balance", h.GetWalletBalance)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/not-a-number/wallet/balance", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestInternalHandler_ValidateSession_NoSecret verifies 503 when session secret is not configured.
+func TestInternalHandler_ValidateSession_NoSecret(t *testing.T) {
+	as := newMockAccountStore()
+	h := makeInternalHandlerWithSecret(as, "") // empty secret → disabled
+
+	r := testRouter()
+	r.POST("/internal/v1/accounts/validate-session", h.ValidateSession)
+
+	body, _ := json.Marshal(map[string]string{"token": "sometoken"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/accounts/validate-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 (session validation not configured)", w.Code)
+	}
+}
+
+// TestInternalHandler_ValidateSession_InvalidToken verifies 401 for invalid token.
+func TestInternalHandler_ValidateSession_InvalidToken(t *testing.T) {
+	as := newMockAccountStore()
+	const secret = "test-session-secret-at-least-32-bytes!!"
+	h := makeInternalHandlerWithSecret(as, secret)
+
+	r := testRouter()
+	r.POST("/internal/v1/accounts/validate-session", h.ValidateSession)
+
+	body, _ := json.Marshal(map[string]string{"token": "not-a-valid-token"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/accounts/validate-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// TestInternalHandler_ValidateSession_MissingToken verifies 400 when token field is absent.
+func TestInternalHandler_ValidateSession_MissingToken(t *testing.T) {
+	as := newMockAccountStore()
+	const secret = "test-session-secret-at-least-32-bytes!!"
+	h := makeInternalHandlerWithSecret(as, secret)
+
+	r := testRouter()
+	r.POST("/internal/v1/accounts/validate-session", h.ValidateSession)
+
+	body, _ := json.Marshal(map[string]string{}) // missing token field
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/accounts/validate-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestInternalHandler_GetEntitlements_Error verifies 500 when entitlement store fails.
+func TestInternalHandler_GetEntitlements_Error(t *testing.T) {
+	entSvc := app.NewEntitlementService(&errEntSubStore{*newMockSubStore()}, newMockPlanStore(), newMockCache())
+	h := NewInternalHandler(
+		makeAccountService(), makeSubService(), entSvc,
+		makeVIPService(), nil, makeWalletService(), makeReferralService(), "",
+	)
+	r := testRouter()
+	r.GET("/internal/v1/accounts/:id/entitlements/:product_id", h.GetEntitlements)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/1/entitlements/lurus_api", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_GetSubscription_Error verifies 500 when the subscription store returns an error.
+func TestInternalHandler_GetSubscription_Error(t *testing.T) {
+	subSvc := app.NewSubscriptionService(&errGetActiveSubStore{*newMockSubStore()}, newMockPlanStore(), makeEntitlementService(), 3)
+	h := NewInternalHandler(
+		makeAccountService(), subSvc, makeEntitlementService(),
+		makeVIPService(), nil, makeWalletService(), makeReferralService(), "",
+	)
+	r := testRouter()
+	r.GET("/internal/v1/accounts/:id/subscription/:product_id", h.GetSubscription)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/1/subscription/lurus_api", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_GetSubscription_Found verifies 200 when an active subscription exists.
+func TestInternalHandler_GetSubscription_Found(t *testing.T) {
+	store := newMockSubStore()
+	store.active["1:lurus_api"] = &entity.Subscription{
+		ID: 1, AccountID: 1, ProductID: "lurus_api", PlanID: 1, Status: "active",
+	}
+	subSvc := app.NewSubscriptionService(store, newMockPlanStore(), makeEntitlementService(), 3)
+	h := NewInternalHandler(
+		makeAccountService(), subSvc, makeEntitlementService(),
+		makeVIPService(), nil, makeWalletService(), makeReferralService(), "",
+	)
+	r := testRouter()
+	r.GET("/internal/v1/accounts/:id/subscription/:product_id", h.GetSubscription)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/1/subscription/lurus_api", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_GetAccountByEmail_Found verifies 200 when account is found by email.
+func TestInternalHandler_GetAccountByEmail_Found(t *testing.T) {
+	eas := newEmailAwareAccountStore()
+	eas.seedEmail(entity.Account{ZitadelSub: "sub-email", Email: "found@x.com"})
+	h := NewInternalHandler(
+		app.NewAccountService(eas, newMockWalletStore(), newMockVIPStore()),
+		makeSubService(),
+		makeEntitlementService(),
+		makeVIPService(),
+		nil,
+		makeWalletService(),
+		makeReferralService(),
+		"",
+	)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-email/:email", h.GetAccountByEmail)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-email/found@x.com", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_GetAccountByEmail_Error verifies 500 when the store returns an error.
+func TestInternalHandler_GetAccountByEmail_Error(t *testing.T) {
+	errStore := &errEmailAccountStore{*newMockAccountStore()}
+	h := NewInternalHandler(
+		app.NewAccountService(errStore, newMockWalletStore(), newMockVIPStore()),
+		makeSubService(),
+		makeEntitlementService(),
+		makeVIPService(),
+		nil,
+		makeWalletService(),
+		makeReferralService(),
+		"",
+	)
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-email/:email", h.GetAccountByEmail)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-email/err@x.com", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_ValidateSession_Success verifies 200 with a valid session token.
+func TestInternalHandler_ValidateSession_Success(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-sess", Email: "sess@x.com"})
+	const secret = "test-session-secret-at-least-32-bytes!!"
+	h := makeInternalHandlerWithSecret(as, secret)
+
+	token, err := auth.IssueSessionToken(acct.ID, time.Hour, secret)
+	if err != nil {
+		t.Fatalf("IssueSessionToken: %v", err)
+	}
+
+	r := testRouter()
+	r.POST("/internal/v1/accounts/validate-session", h.ValidateSession)
+
+	body, _ := json.Marshal(map[string]string{"token": token})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/accounts/validate-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestInternalHandler_ValidateSession_AccountNotFound verifies 404 when token is valid but account is absent.
+func TestInternalHandler_ValidateSession_AccountNotFound(t *testing.T) {
+	as := newMockAccountStore() // empty store — no account with ID 999
+	const secret = "test-session-secret-at-least-32-bytes!!"
+	h := makeInternalHandlerWithSecret(as, secret)
+
+	token, err := auth.IssueSessionToken(999, time.Hour, secret)
+	if err != nil {
+		t.Fatalf("IssueSessionToken: %v", err)
+	}
+
+	r := testRouter()
+	r.POST("/internal/v1/accounts/validate-session", h.ValidateSession)
+
+	body, _ := json.Marshal(map[string]string{"token": token})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/accounts/validate-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+}
+func TestInternalHandler_GetAccountByOAuth_Error(t *testing.T) {
+	errStore := &errOAuthBindingStoreH{*newMockAccountStore()}
+	acctSvc := app.NewAccountService(errStore, newMockWalletStore(), newMockVIPStore())
+	h := NewInternalHandler(acctSvc, makeSubService(), makeEntitlementService(), makeVIPService(), nil, makeWalletService(), makeReferralService(), "")
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-oauth/:provider/:provider_id", h.GetAccountByOAuth)
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-oauth/wechat/wx-err", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestInternalHandler_GetAccountByOAuth_Found(t *testing.T) {
+	oauthStore := &oauthAwareAccountStore{mockAccountStore: *newMockAccountStore()}
+	acct := oauthStore.seed(entity.Account{ZitadelSub: "sub-oauth-found", Email: "oauth@x.com"})
+	oauthStore.oauthAccount = acct
+	acctSvc := app.NewAccountService(oauthStore, newMockWalletStore(), newMockVIPStore())
+	h := NewInternalHandler(acctSvc, makeSubService(), makeEntitlementService(), makeVIPService(), nil, makeWalletService(), makeReferralService(), "")
+
+	r := testRouter()
+	r.GET("/internal/v1/accounts/by-oauth/:provider/:provider_id", h.GetAccountByOAuth)
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/accounts/by-oauth/wechat/wx-found", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
 }

@@ -3,6 +3,7 @@ package entity
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -13,12 +14,13 @@ type Account struct {
 	ZitadelSub    string     `json:"zitadel_sub"    gorm:"type:varchar(128);uniqueIndex"`
 	DisplayName   string     `json:"display_name"   gorm:"type:varchar(64);not null"`
 	AvatarURL     string     `json:"avatar_url"     gorm:"type:text"`
-	Email         string     `json:"email"          gorm:"type:varchar(255);uniqueIndex;not null"`
+	Email         string     `json:"email"          gorm:"type:varchar(255)"`
 	EmailVerified bool       `json:"email_verified" gorm:"default:false"`
 	Phone         string     `json:"phone"          gorm:"type:varchar(32)"`
 	PhoneVerified bool       `json:"phone_verified" gorm:"default:false"`
 	Status        int16      `json:"status"         gorm:"default:1"` // 1=active 2=suspended 3=deleted
 	Locale        string     `json:"locale"         gorm:"type:varchar(8);default:'zh-CN'"`
+	Username      string     `json:"username"       gorm:"type:varchar(64)"` // uniqueness enforced via partial index in migration 010
 	ReferrerID    *int64     `json:"referrer_id"    gorm:"index"`
 	AffCode       string     `json:"aff_code"       gorm:"type:varchar(32);uniqueIndex;not null"`
 	CreatedAt     time.Time  `json:"created_at"     gorm:"autoCreateTime"`
@@ -53,3 +55,25 @@ type OAuthBinding struct {
 }
 
 func (OAuthBinding) TableName() string { return "identity.account_oauth_bindings" }
+
+// Username validation: 3-32 alphanumeric/underscore, OR 11-digit China phone number.
+var (
+	reUsername = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
+	rePhone   = regexp.MustCompile(`^1[3-9]\d{9}$`)
+)
+
+// ValidateUsername checks if s is a valid username (3-32 chars alphanumeric/underscore or 11-digit China phone).
+func ValidateUsername(s string) error {
+	if s == "" {
+		return fmt.Errorf("username is required")
+	}
+	if reUsername.MatchString(s) || rePhone.MatchString(s) {
+		return nil
+	}
+	return fmt.Errorf("username must be 3-32 alphanumeric/underscore characters, or a valid phone number")
+}
+
+// IsPhoneNumber checks if s is an 11-digit China mainland phone number.
+func IsPhoneNumber(s string) bool {
+	return rePhone.MatchString(s)
+}

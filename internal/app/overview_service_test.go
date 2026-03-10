@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
@@ -115,6 +117,137 @@ func TestOverviewService_Get_WithProductID(t *testing.T) {
 	}
 	if ov.Subscription != nil {
 		t.Error("expected nil Subscription when no active sub exists")
+	}
+}
+
+// ── error-returning stores for compute error-path coverage ────────────────────
+
+type errAccountStoreOv struct{ mockAccountStore }
+
+func (s *errAccountStoreOv) GetByID(_ context.Context, _ int64) (*entity.Account, error) {
+	return nil, fmt.Errorf("account db error")
+}
+
+type errVIPStoreOv struct{ mockVIPStore }
+
+func (s *errVIPStoreOv) GetOrCreate(_ context.Context, _ int64) (*entity.AccountVIP, error) {
+	return nil, fmt.Errorf("vip db error")
+}
+
+type errWalletStoreOv struct{ mockWalletStore }
+
+func (s *errWalletStoreOv) GetOrCreate(_ context.Context, _ int64) (*entity.Wallet, error) {
+	return nil, fmt.Errorf("wallet db error")
+}
+
+type errSubStoreOv struct{ mockSubStore }
+
+func (s *errSubStoreOv) GetActive(_ context.Context, _ int64, _ string) (*entity.Subscription, error) {
+	return nil, fmt.Errorf("sub db error")
+}
+
+func TestOverviewService_compute_GetByIDError(t *testing.T) {
+	as := &errAccountStoreOv{*newMockAccountStore()}
+	ws := newMockWalletStore()
+	vs := NewVIPService(newMockVIPStore(nil), ws)
+	ss := NewSubscriptionService(newMockSubStore(), newMockPlanStore(), NewEntitlementService(newMockSubStore(), newMockPlanStore(), newMockCache()), 3)
+	ps := newMockPlanStore()
+	oc := newMockOverviewCache()
+	svc := NewOverviewService(as, vs, ws, ss, ps, oc)
+
+	_, err := svc.Get(context.Background(), 1, "")
+	if err == nil {
+		t.Fatal("expected error when GetByID fails")
+	}
+}
+
+func TestOverviewService_compute_VIPError(t *testing.T) {
+	as := newMockAccountStore()
+	ctx := context.Background()
+	_ = as.Create(ctx, &entity.Account{DisplayName: "VIPErr", ZitadelSub: "sub-ve", LurusID: "LU0000010"})
+	ws := newMockWalletStore()
+	vs := NewVIPService(&errVIPStoreOv{*newMockVIPStore(nil)}, ws)
+	ss := NewSubscriptionService(newMockSubStore(), newMockPlanStore(), NewEntitlementService(newMockSubStore(), newMockPlanStore(), newMockCache()), 3)
+	ps := newMockPlanStore()
+	oc := newMockOverviewCache()
+	svc := NewOverviewService(as, vs, ws, ss, ps, oc)
+
+	_, err := svc.Get(ctx, 1, "")
+	if err == nil {
+		t.Fatal("expected error when VIP.Get fails")
+	}
+}
+
+func TestOverviewService_compute_WalletError(t *testing.T) {
+	as := newMockAccountStore()
+	ctx := context.Background()
+	_ = as.Create(ctx, &entity.Account{DisplayName: "WalletErr", ZitadelSub: "sub-we", LurusID: "LU0000011"})
+	errWs := &errWalletStoreOv{*newMockWalletStore()}
+	vs := NewVIPService(newMockVIPStore(nil), newMockWalletStore())
+	ss := NewSubscriptionService(newMockSubStore(), newMockPlanStore(), NewEntitlementService(newMockSubStore(), newMockPlanStore(), newMockCache()), 3)
+	ps := newMockPlanStore()
+	oc := newMockOverviewCache()
+	svc := NewOverviewService(as, vs, errWs, ss, ps, oc)
+
+	_, err := svc.Get(ctx, 1, "")
+	if err == nil {
+		t.Fatal("expected error when wallet.GetOrCreate fails")
+	}
+}
+
+func TestOverviewService_compute_SubError(t *testing.T) {
+	as := newMockAccountStore()
+	ctx := context.Background()
+	_ = as.Create(ctx, &entity.Account{DisplayName: "SubErr", ZitadelSub: "sub-sube", LurusID: "LU0000012"})
+	ws := newMockWalletStore()
+	vs := NewVIPService(newMockVIPStore(nil), ws)
+	errSubs := &errSubStoreOv{*newMockSubStore()}
+	ss := NewSubscriptionService(errSubs, newMockPlanStore(), NewEntitlementService(newMockSubStore(), newMockPlanStore(), newMockCache()), 3)
+	ps := newMockPlanStore()
+	oc := newMockOverviewCache()
+	svc := NewOverviewService(as, vs, ws, ss, ps, oc)
+
+	// non-empty productID triggers GetActive
+	_, err := svc.Get(ctx, 1, "lurus_api")
+	if err == nil {
+		t.Fatal("expected error when SubscriptionService.GetActive fails")
+	}
+}
+
+func TestOverviewService_compute_SubscriptionFound(t *testing.T) {
+	as := newMockAccountStore()
+	ctx := context.Background()
+	_ = as.Create(ctx, &entity.Account{DisplayName: "SubFound", ZitadelSub: "sub-sf", LurusID: "LU0000013"})
+	ws := newMockWalletStore()
+	vs := NewVIPService(newMockVIPStore(nil), ws)
+
+	// Seed a plan and an active subscription
+	ps := newMockPlanStore()
+	_ = ps.CreatePlan(ctx, &entity.ProductPlan{ProductID: "lurus_api", Code: "basic", PriceCNY: 29.9, Status: 1})
+
+	subStore := newMockSubStore()
+	exp := time.Now().Add(30 * 24 * time.Hour)
+	_ = subStore.Create(ctx, &entity.Subscription{
+		AccountID: 1, ProductID: "lurus_api", PlanID: 1,
+		Status: entity.SubStatusActive, ExpiresAt: &exp,
+	})
+
+	ss := NewSubscriptionService(subStore, ps, NewEntitlementService(newMockSubStore(), newMockPlanStore(), newMockCache()), 3)
+	oc := newMockOverviewCache()
+	svc := NewOverviewService(as, vs, ws, ss, ps, oc)
+
+	ov, err := svc.Get(ctx, 1, "lurus_api")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ov.Subscription == nil {
+		t.Fatal("expected Subscription to be non-nil")
+	}
+	if ov.Subscription.PlanCode != "basic" {
+		t.Errorf("PlanCode=%q, want basic", ov.Subscription.PlanCode)
+	}
+	if ov.Subscription.ProductID != "lurus_api" {
+		t.Errorf("ProductID=%q, want lurus_api", ov.Subscription.ProductID)
 	}
 }
 

@@ -197,3 +197,37 @@ func TestWalletService_MarkOrderPaid_Idempotent(t *testing.T) {
 		t.Errorf("balance=%.2f, want 0 (idempotent)", w.Balance)
 	}
 }
+
+// TestWalletService_GetBalance_ExistingWallet verifies GetBalance returns wallet for existing account.
+func TestWalletService_GetBalance_ExistingWallet(t *testing.T) {
+	svc, ws := makeWalletService()
+	ctx := context.Background()
+
+	// Seed a wallet.
+	_, _ = svc.GetWallet(ctx, 10)
+
+	w, err := svc.GetBalance(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetBalance error: %v", err)
+	}
+	if w == nil {
+		t.Fatal("expected non-nil wallet")
+	}
+	if w.AccountID != 10 {
+		t.Errorf("AccountID = %d, want 10", w.AccountID)
+	}
+	_ = ws
+}
+
+// TestWalletService_GetBalance_NotFound verifies GetBalance returns nil for unknown account.
+func TestWalletService_GetBalance_NotFound(t *testing.T) {
+	svc, _ := makeWalletService()
+
+	w, err := svc.GetBalance(context.Background(), 9999)
+	if err != nil {
+		t.Fatalf("GetBalance error: %v", err)
+	}
+	if w != nil {
+		t.Error("expected nil wallet for unknown account")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hanmahong5-arch/lurus-identity/internal/app"
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 )
 
@@ -312,5 +313,91 @@ func TestAccountHandler_AdminGrantEntitlement(t *testing.T) {
 				t.Errorf("status = %d, want %d, body: %s", w.Code, tt.status, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestAccountHandler_UpdateMe_NotFound(t *testing.T) {
+	h := NewAccountHandler(makeAccountService(), makeVIPService(), makeSubService(), nil, makeReferralService())
+	r := testRouter()
+	// withAccountID(999) → GetByID(999) returns nil from empty store → 404
+	r.PUT("/api/v1/account/me", withAccountID(999), h.UpdateMe)
+
+	body, _ := json.Marshal(map[string]string{"display_name": "Test"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/account/me", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAccountHandler_UpdateMe_AllFields(t *testing.T) {
+	as := newMockAccountStore()
+	acct := as.seed(entity.Account{ZitadelSub: "sub-all", Email: "all@x.com"})
+	h := NewAccountHandler(makeAccountServiceWith(as), makeVIPService(), makeSubService(), nil, makeReferralService())
+	r := testRouter()
+	r.PUT("/api/v1/account/me", withAccountID(acct.ID), h.UpdateMe)
+
+	body, _ := json.Marshal(map[string]string{
+		"display_name": "Full Name",
+		"avatar_url":   "https://example.com/avatar.png",
+		"username":     "fulluser",
+		"locale":       "en-US",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/account/me", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAccountHandler_GetServices_Error(t *testing.T) {
+	subSvc := app.NewSubscriptionService(&errSubStoreH{*newMockSubStore()}, newMockPlanStore(), makeEntitlementService(), 3)
+	h := NewAccountHandler(makeAccountService(), makeVIPService(), subSvc, nil, makeReferralService())
+	r := testRouter()
+	r.GET("/api/v1/account/me/services", withAccountID(1), h.GetServices)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/services", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAccountHandler_GetMeOverview_Error verifies 500 when the overview service fails.
+func TestAccountHandler_GetMeOverview_Error(t *testing.T) {
+	errStore := &errAccountStoreH{*newMockAccountStore()}
+	errOvSvc := app.NewOverviewService(
+		errStore, makeVIPService(), newMockWalletStore(), makeSubService(), newMockPlanStore(), &mockOverviewCacheH{},
+	)
+	h := NewAccountHandler(makeAccountService(), makeVIPService(), makeSubService(), errOvSvc, makeReferralService())
+	r := testRouter()
+	r.GET("/api/v1/account/me/overview", withAccountID(1), h.GetMeOverview)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/overview", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAccountHandler_GetMeOverview_AccountNotFound verifies 500 when account is not in store.
+func TestAccountHandler_GetMeOverview_AccountNotFound(t *testing.T) {
+	// Empty account store: GetByID(9999) returns nil,nil → compute sees a==nil → error.
+	ovSvc := makeOverviewServiceH()
+	h := NewAccountHandler(makeAccountService(), makeVIPService(), makeSubService(), ovSvc, makeReferralService())
+	r := testRouter()
+	r.GET("/api/v1/account/me/overview", withAccountID(9999), h.GetMeOverview)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/account/me/overview", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body: %s", w.Code, w.Body.String())
 	}
 }

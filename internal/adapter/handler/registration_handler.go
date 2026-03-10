@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +59,7 @@ func (h *RegistrationHandler) Register(c *gin.Context) {
 			contains(err.Error(), "already exists in Zitadel"):
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
+			slog.Error("registration failed", "err", err, "username", req.Username)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "registration failed"})
 		}
 		return

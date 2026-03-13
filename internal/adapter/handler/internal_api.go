@@ -209,7 +209,7 @@ func (h *InternalHandler) DebitWallet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	tx, err := h.wallet.Debit(c.Request.Context(), id, req.Amount, req.Type, req.Description, req.ProductID, "internal_debit", "")
+	tx, err := h.wallet.Debit(c.Request.Context(), id, req.Amount, req.Type, req.Description, "internal_debit", "", req.ProductID)
 	if err != nil {
 		// Insufficient balance returns a structured error
 		c.JSON(http.StatusBadRequest, gin.H{"error": "insufficient_balance"})

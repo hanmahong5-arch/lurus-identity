@@ -28,17 +28,29 @@ type refundOutboxWriter interface {
 	Insert(ctx context.Context, ev *event.IdentityEvent) error
 }
 
+// subscriptionCanceller allows RefundService to cancel the subscription tied to a refunded order.
+type subscriptionCanceller interface {
+	Cancel(ctx context.Context, accountID int64, productID string) error
+}
+
 // RefundService orchestrates the refund request and approval workflow.
 type RefundService struct {
 	refunds   refundStore
 	wallets   walletStore
 	publisher RefundPublisher
 	outbox    refundOutboxWriter
+	subCancel subscriptionCanceller // optional; nil when not wired
 }
 
 // NewRefundService creates a new RefundService.
 func NewRefundService(refunds refundStore, wallets walletStore, publisher RefundPublisher, outbox refundOutboxWriter) *RefundService {
 	return &RefundService{refunds: refunds, wallets: wallets, publisher: publisher, outbox: outbox}
+}
+
+// WithSubscriptionCanceller attaches a subscription canceller and returns for chaining.
+func (s *RefundService) WithSubscriptionCanceller(c subscriptionCanceller) *RefundService {
+	s.subCancel = c
+	return s
 }
 
 // RequestRefund creates a new refund request for a paid order.
@@ -107,7 +119,8 @@ func (s *RefundService) ListByAccount(ctx context.Context, accountID int64, page
 }
 
 // Approve transitions a pending refund to approved, credits the wallet, then marks it completed.
-// Workflow: pending → approved (DB) → credit wallet → completed (DB) → publish NATS event.
+// Workflow: pending → approved (DB, conditional) → credit wallet → completed (DB) → publish NATS event.
+// The conditional UPDATE prevents double-refund on concurrent admin approvals.
 func (s *RefundService) Approve(ctx context.Context, refundNo, reviewerID, reviewNote string) error {
 	r, err := s.refunds.GetByRefundNo(ctx, refundNo)
 	if err != nil {
@@ -120,10 +133,11 @@ func (s *RefundService) Approve(ctx context.Context, refundNo, reviewerID, revie
 		return fmt.Errorf("refund is not in pending state (current: %s)", r.Status)
 	}
 
-	// Transition to approved.
+	// Conditional transition: only pending→approved succeeds; concurrent calls get an error.
 	now := time.Now().UTC()
 	if err := s.refunds.UpdateStatus(ctx, refundNo,
-		string(entity.RefundStatusApproved), reviewNote, reviewerID, &now); err != nil {
+		string(entity.RefundStatusPending), string(entity.RefundStatusApproved),
+		reviewNote, reviewerID, &now); err != nil {
 		return fmt.Errorf("update refund status to approved: %w", err)
 	}
 
@@ -155,6 +169,17 @@ func (s *RefundService) Approve(ctx context.Context, refundNo, reviewerID, revie
 		return fmt.Errorf("mark refund completed: %w", err)
 	}
 
+	// If the refunded order was a subscription, cancel it (best-effort, non-fatal).
+	if s.subCancel != nil {
+		order, _ := s.wallets.GetPaymentOrderByNo(ctx, r.OrderNo)
+		if order != nil && order.OrderType == "subscription" && order.ProductID != "" {
+			if cancelErr := s.subCancel.Cancel(ctx, r.AccountID, order.ProductID); cancelErr != nil {
+				slog.Warn("refund/approve: cancel subscription after refund failed",
+					"refund_no", refundNo, "product_id", order.ProductID, "err", cancelErr)
+			}
+		}
+	}
+
 	// Best-effort NATS event publish.
 	s.publishRefundCompleted(r)
 
@@ -176,7 +201,8 @@ func (s *RefundService) Reject(ctx context.Context, refundNo, reviewerID, review
 
 	now := time.Now().UTC()
 	if err := s.refunds.UpdateStatus(ctx, refundNo,
-		string(entity.RefundStatusRejected), reviewNote, reviewerID, &now); err != nil {
+		string(entity.RefundStatusPending), string(entity.RefundStatusRejected),
+		reviewNote, reviewerID, &now); err != nil {
 		return fmt.Errorf("update refund status to rejected: %w", err)
 	}
 	return nil

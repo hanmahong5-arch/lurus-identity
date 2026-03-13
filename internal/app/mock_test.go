@@ -337,6 +337,73 @@ func (m *mockWalletStore) ListOrders(_ context.Context, accountID int64, _, _ in
 	return out, int64(len(out)), nil
 }
 
+func (m *mockWalletStore) MarkPaymentOrderPaid(_ context.Context, orderNo string) (*entity.PaymentOrder, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.orders[orderNo]
+	if !ok {
+		return nil, false, nil
+	}
+	if o.Status != entity.OrderStatusPending {
+		cp := *o
+		return &cp, false, nil // already non-pending, idempotent
+	}
+	now := time.Now().UTC()
+	o.Status = entity.OrderStatusPaid
+	o.PaidAt = &now
+	cp := *o
+	return &cp, true, nil
+}
+
+func (m *mockWalletStore) ExpireStalePendingOrders(_ context.Context, maxAge time.Duration) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	var count int64
+	for _, o := range m.orders {
+		if o.Status == entity.OrderStatusPending && o.CreatedAt.Before(cutoff) {
+			o.Status = "expired"
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockWalletStore) RedeemCode(_ context.Context, accountID int64, code string) (*entity.WalletTransaction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rc, ok := m.codes[code]
+	if !ok {
+		return nil, fmt.Errorf("invalid code")
+	}
+	if rc.ExpiresAt != nil && rc.ExpiresAt.Before(time.Now()) {
+		return nil, fmt.Errorf("code has expired")
+	}
+	if rc.UsedCount >= rc.MaxUses {
+		return nil, fmt.Errorf("code has reached its usage limit")
+	}
+	if rc.RewardType != "credits" {
+		return nil, fmt.Errorf("unsupported reward type: %s", rc.RewardType)
+	}
+	w, ok := m.wallets[accountID]
+	if !ok {
+		w = &entity.Wallet{ID: m.nextWID, AccountID: accountID}
+		m.nextWID++
+		m.wallets[accountID] = w
+	}
+	w.Balance += rc.RewardValue
+	rc.UsedCount++
+	tx := entity.WalletTransaction{
+		ID: int64(len(m.txs) + 1), WalletID: w.ID, AccountID: accountID,
+		Type: entity.TxTypeRedemption, Amount: rc.RewardValue, BalanceAfter: w.Balance,
+		ReferenceType: "redemption_code", ReferenceID: rc.Code,
+		Description: fmt.Sprintf("Redeem code %s", rc.Code), ProductID: rc.ProductID,
+	}
+	m.txs = append(m.txs, tx)
+	cp := tx
+	return &cp, nil
+}
+
 // ── vipStore mock ─────────────────────────────────────────────────────────────
 
 type mockVIPStore struct {
@@ -679,14 +746,17 @@ func (m *mockRefundStore) GetPendingByOrderNo(_ context.Context, orderNo string)
 	return nil, nil
 }
 
-func (m *mockRefundStore) UpdateStatus(_ context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error {
+func (m *mockRefundStore) UpdateStatus(_ context.Context, refundNo, fromStatus, toStatus, reviewNote, reviewedBy string, reviewedAt *time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.byNo[refundNo]
 	if !ok {
 		return fmt.Errorf("refund %s not found", refundNo)
 	}
-	r.Status = entity.RefundStatus(status)
+	if string(r.Status) != fromStatus {
+		return fmt.Errorf("refund %s: transition %s->%s failed (concurrent or wrong state)", refundNo, fromStatus, toStatus)
+	}
+	r.Status = entity.RefundStatus(toStatus)
 	r.ReviewNote = reviewNote
 	r.ReviewedBy = reviewedBy
 	r.ReviewedAt = reviewedAt

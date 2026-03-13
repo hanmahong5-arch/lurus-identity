@@ -260,6 +260,15 @@ func (w *noopWalletStore) UpdateRedemptionCode(_ context.Context, _ *entity.Rede
 func (w *noopWalletStore) ListOrders(_ context.Context, _ int64, _, _ int) ([]entity.PaymentOrder, int64, error) {
 	return nil, 0, nil
 }
+func (w *noopWalletStore) MarkPaymentOrderPaid(_ context.Context, _ string) (*entity.PaymentOrder, bool, error) {
+	return nil, false, nil
+}
+func (w *noopWalletStore) RedeemCode(_ context.Context, _ int64, _ string) (*entity.WalletTransaction, error) {
+	return nil, nil
+}
+func (w *noopWalletStore) ExpireStalePendingOrders(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
 
 type noopVIPStore struct{}
 

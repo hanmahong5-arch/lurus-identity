@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -222,7 +223,7 @@ func TestWalletRepo_ListOrders(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		repo.CreatePaymentOrder(ctx, &entity.PaymentOrder{
-			AccountID: 1, OrderNo: GenerateOrderNo(int64(i + 1)),
+			AccountID: 1, OrderNo: fmt.Sprintf("LO-test-%d", i+1),
 			OrderType: "topup", AmountCNY: float64((i + 1) * 10),
 		})
 	}

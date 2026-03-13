@@ -89,17 +89,16 @@ func (h *WebhookHandler) StripeWebhook(c *gin.Context) {
 	}
 
 	sig := c.GetHeader("Stripe-Signature")
-	orderNo, ok := h.stripe.VerifyWebhook(body, sig)
+	orderNo, eventID, ok := h.stripe.VerifyWebhook(body, sig)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid stripe signature"})
 		return
 	}
 
-	// Use Stripe-Signature as a proxy event ID (deterministic per event).
-	eventID := c.GetHeader("Stripe-Signature")
+	// Use Stripe's stable event ID for deduplication (not the signature header).
 	if err := h.deduper.TryProcess(c.Request.Context(), eventID); err != nil {
 		if errors.Is(err, idempotency.ErrAlreadyProcessed) {
-			slog.Info("webhook/stripe: duplicate event, skipping")
+			slog.Info("webhook/stripe: duplicate event, skipping", "event_id", eventID)
 			c.JSON(http.StatusOK, gin.H{"received": true})
 			return
 		}

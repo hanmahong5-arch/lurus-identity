@@ -3,7 +3,9 @@ package repo
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
 	"gorm.io/gorm"
 )
 
@@ -39,4 +41,18 @@ func (r *ReferralRepo) GetReferralStats(ctx context.Context, referrerAccountID i
 		return 0, 0, fmt.Errorf("query referral stats: %w", err)
 	}
 	return result.TotalReferrals, result.TotalRewardedLB, nil
+}
+
+// CreateRewardEvent inserts a referral reward event.
+// Returns (true, nil) on success, (false, nil) if UNIQUE constraint violated (idempotent).
+func (r *ReferralRepo) CreateRewardEvent(ctx context.Context, ev *entity.ReferralRewardEvent) (bool, error) {
+	if err := r.db.WithContext(ctx).Create(ev).Error; err != nil {
+		// Check for unique violation (PostgreSQL error code 23505).
+		if strings.Contains(err.Error(), "uq_referral_reward_event") ||
+			strings.Contains(err.Error(), "23505") {
+			return false, nil
+		}
+		return false, fmt.Errorf("insert reward event: %w", err)
+	}
+	return true, nil
 }

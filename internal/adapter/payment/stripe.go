@@ -74,23 +74,23 @@ func (p *StripeProvider) CreateCheckout(ctx context.Context, o *entity.PaymentOr
 	return s.URL, s.ID, nil
 }
 
-// VerifyWebhook validates the Stripe webhook signature and extracts the order number.
-// Returns the order number from client_reference_id for checkout.session.completed events.
-func (p *StripeProvider) VerifyWebhook(payload []byte, sig string) (orderNo string, ok bool) {
+// VerifyWebhook validates the Stripe webhook signature and extracts the order number + event ID.
+// eventID is the Stripe event's unique identifier, suitable for deduplication.
+func (p *StripeProvider) VerifyWebhook(payload []byte, sig string) (orderNo, eventID string, ok bool) {
 	if p.webhookSecret == "" {
-		return "", false
+		return "", "", false
 	}
 	event, err := webhook.ConstructEvent(payload, sig, p.webhookSecret)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	if event.Type != "checkout.session.completed" {
-		return "", true // valid event but not the one we care about
+		return "", event.ID, true // valid event but not the one we care about
 	}
 	// Extract ClientReferenceID from the session object
 	s, ok2 := event.Data.Object["client_reference_id"].(string)
 	if !ok2 || s == "" {
-		return "", false
+		return "", event.ID, false
 	}
-	return s, true
+	return s, event.ID, true
 }

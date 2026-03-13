@@ -63,7 +63,7 @@ func TestStripeProvider_Name(t *testing.T) {
 func TestStripeProvider_VerifyWebhook_EmptySecret(t *testing.T) {
 	p := &StripeProvider{secretKey: "sk_test", webhookSecret: ""}
 
-	_, ok := p.VerifyWebhook([]byte(`{}`), "t=1,v1=abc")
+	_, _, ok := p.VerifyWebhook([]byte(`{}`), "t=1,v1=abc")
 	if ok {
 		t.Error("expected ok=false when webhook secret is empty")
 	}
@@ -75,7 +75,7 @@ func TestStripeProvider_VerifyWebhook_InvalidSignature(t *testing.T) {
 	payload := stripeEvent("checkout.session.completed", "LO-001")
 	wrongSig := generateStripeSig(payload, "whsec_wrong", time.Now().Unix())
 
-	_, ok := p.VerifyWebhook(payload, wrongSig)
+	_, _, ok := p.VerifyWebhook(payload, wrongSig)
 	if ok {
 		t.Error("expected ok=false for invalid signature")
 	}
@@ -89,7 +89,7 @@ func TestStripeProvider_VerifyWebhook_ValidCheckoutCompleted(t *testing.T) {
 	ts := time.Now().Unix()
 	sig := generateStripeSig(payload, secret, ts)
 
-	orderNo, ok := p.VerifyWebhook(payload, sig)
+	orderNo, _, ok := p.VerifyWebhook(payload, sig)
 	if !ok {
 		t.Fatal("expected ok=true for valid checkout.session.completed")
 	}
@@ -106,7 +106,7 @@ func TestStripeProvider_VerifyWebhook_IrrelevantEvent(t *testing.T) {
 	ts := time.Now().Unix()
 	sig := generateStripeSig(payload, secret, ts)
 
-	orderNo, ok := p.VerifyWebhook(payload, sig)
+	orderNo, _, ok := p.VerifyWebhook(payload, sig)
 	if !ok {
 		t.Fatal("expected ok=true for valid but irrelevant event")
 	}
@@ -123,7 +123,7 @@ func TestStripeProvider_VerifyWebhook_MissingClientReferenceID(t *testing.T) {
 	ts := time.Now().Unix()
 	sig := generateStripeSig(payload, secret, ts)
 
-	orderNo, ok := p.VerifyWebhook(payload, sig)
+	orderNo, _, ok := p.VerifyWebhook(payload, sig)
 	if ok && orderNo != "" {
 		t.Errorf("expected empty orderNo when client_reference_id missing, got %q", orderNo)
 	}
@@ -137,7 +137,7 @@ func TestStripeProvider_VerifyWebhook_StaleTimestamp(t *testing.T) {
 	staleTS := time.Now().Add(-10 * time.Minute).Unix()
 	sig := generateStripeSig(payload, secret, staleTS)
 
-	_, ok := p.VerifyWebhook(payload, sig)
+	_, _, ok := p.VerifyWebhook(payload, sig)
 	if ok {
 		t.Error("expected ok=false for stale timestamp (>5min)")
 	}

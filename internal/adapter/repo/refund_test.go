@@ -90,7 +90,7 @@ func TestRefundRepo_UpdateStatus(t *testing.T) {
 	})
 
 	now := time.Now()
-	err := repo.UpdateStatus(ctx, "REF-U1", string(entity.RefundStatusApproved), "looks good", "admin-1", &now)
+	err := repo.UpdateStatus(ctx, "REF-U1", string(entity.RefundStatusPending), string(entity.RefundStatusApproved), "looks good", "admin-1", &now)
 	if err != nil {
 		t.Fatalf("UpdateStatus: %v", err)
 	}

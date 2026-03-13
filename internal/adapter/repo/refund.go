@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/hanmahong5-arch/lurus-identity/internal/domain/entity"
@@ -51,17 +52,25 @@ func (r *RefundRepo) GetPendingByOrderNo(ctx context.Context, orderNo string) (*
 	return &ref, nil
 }
 
-// UpdateStatus updates the status, review metadata, and reviewer info of a refund.
-func (r *RefundRepo) UpdateStatus(ctx context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error {
-	return r.db.WithContext(ctx).
+// UpdateStatus atomically transitions a refund from fromStatus to toStatus.
+// Returns an error if zero rows matched (concurrent update or wrong state).
+func (r *RefundRepo) UpdateStatus(ctx context.Context, refundNo, fromStatus, toStatus, reviewNote, reviewedBy string, reviewedAt *time.Time) error {
+	result := r.db.WithContext(ctx).
 		Model(&entity.Refund{}).
-		Where("refund_no = ?", refundNo).
+		Where("refund_no = ? AND status = ?", refundNo, fromStatus).
 		Updates(map[string]any{
-			"status":      status,
+			"status":      toStatus,
 			"review_note": reviewNote,
 			"reviewed_by": reviewedBy,
 			"reviewed_at": reviewedAt,
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("refund %s: transition %s->%s failed (concurrent or wrong state)", refundNo, fromStatus, toStatus)
+	}
+	return nil
 }
 
 // MarkCompleted sets the refund status to completed and records the completion timestamp.

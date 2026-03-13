@@ -162,9 +162,9 @@ func (j *RenewalJob) processOne(ctx context.Context, sub entity.Subscription) er
 		plan.PriceCNY,
 		renewalTxType,
 		fmt.Sprintf("Auto-renewal for plan %s", plan.Code),
-		sub.ProductID,
 		"subscription",
 		orderRef,
+		sub.ProductID,
 	)
 
 	if debitErr == nil {

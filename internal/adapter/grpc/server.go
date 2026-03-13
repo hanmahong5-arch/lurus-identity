@@ -157,7 +157,7 @@ func (s *Server) ReportUsage(ctx context.Context, req *identityv1.ReportUsageReq
 
 // WalletDebit implements IdentityServiceServer.
 func (s *Server) WalletDebit(ctx context.Context, req *identityv1.WalletOperationRequest) (*identityv1.WalletOperationResponse, error) {
-	tx, err := s.wallet.Debit(ctx, req.AccountId, req.Amount, req.Type, req.Description, req.ProductId, "internal_debit", "")
+	tx, err := s.wallet.Debit(ctx, req.AccountId, req.Amount, req.Type, req.Description, "internal_debit", "", req.ProductId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "insufficient_balance")
 	}

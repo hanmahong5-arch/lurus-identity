@@ -37,6 +37,12 @@ type walletStore interface {
 	GetRedemptionCode(ctx context.Context, code string) (*entity.RedemptionCode, error)
 	UpdateRedemptionCode(ctx context.Context, rc *entity.RedemptionCode) error
 	ListOrders(ctx context.Context, accountID int64, page, pageSize int) ([]entity.PaymentOrder, int64, error)
+	// MarkPaymentOrderPaid atomically transitions pending→paid. didTransition=true if this call did the flip.
+	MarkPaymentOrderPaid(ctx context.Context, orderNo string) (order *entity.PaymentOrder, didTransition bool, err error)
+	// RedeemCode validates + credits inside a single DB transaction (TOCTOU safe).
+	RedeemCode(ctx context.Context, accountID int64, code string) (*entity.WalletTransaction, error)
+	// ExpireStalePendingOrders marks pending orders older than maxAge as expired.
+	ExpireStalePendingOrders(ctx context.Context, maxAge time.Duration) (int64, error)
 }
 
 // vipStore is the minimal DB interface required by VIPService.
@@ -103,7 +109,8 @@ type refundStore interface {
 	Create(ctx context.Context, r *entity.Refund) error
 	GetByRefundNo(ctx context.Context, refundNo string) (*entity.Refund, error)
 	GetPendingByOrderNo(ctx context.Context, orderNo string) (*entity.Refund, error)
-	UpdateStatus(ctx context.Context, refundNo, status, reviewNote, reviewedBy string, reviewedAt *time.Time) error
+	// UpdateStatus atomically transitions fromStatus→toStatus; fails if the row is not in fromStatus.
+	UpdateStatus(ctx context.Context, refundNo, fromStatus, toStatus, reviewNote, reviewedBy string, reviewedAt *time.Time) error
 	MarkCompleted(ctx context.Context, refundNo string, completedAt time.Time) error
 	ListByAccount(ctx context.Context, accountID int64, page, pageSize int) ([]entity.Refund, int64, error)
 }
@@ -119,6 +126,12 @@ type overviewCache interface {
 // referralStatsStore supports querying aggregated referral reward statistics.
 type referralStatsStore interface {
 	GetReferralStats(ctx context.Context, referrerAccountID int64) (totalReferrals int, totalRewardedLB float64, err error)
+}
+
+// rewardEventStore records referral reward events with UNIQUE dedup.
+type rewardEventStore interface {
+	// CreateRewardEvent inserts a reward event. Returns false if a duplicate (same referrer+referee+event_type) exists.
+	CreateRewardEvent(ctx context.Context, ev *entity.ReferralRewardEvent) (created bool, err error)
 }
 
 // orgStore is the minimal DB interface required by OrganizationService.

@@ -43,7 +43,7 @@ func (s *seedRefundStoreH) GetPendingByOrderNo(_ context.Context, _ string) (*en
 	return nil, nil
 }
 
-func (s *seedRefundStoreH) UpdateStatus(_ context.Context, refundNo, status, _, _ string, _ *time.Time) error {
+func (s *seedRefundStoreH) UpdateStatus(_ context.Context, refundNo, _, status, _, _ string, _ *time.Time) error {
 	if r, ok := s.refunds[refundNo]; ok {
 		r.Status = entity.RefundStatus(status)
 	}

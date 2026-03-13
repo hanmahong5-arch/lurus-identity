@@ -270,6 +270,18 @@ func (m *grpcMockWalletStore) ListOrders(_ context.Context, _ int64, _, _ int) (
 	return nil, 0, nil
 }
 
+func (m *grpcMockWalletStore) MarkPaymentOrderPaid(_ context.Context, _ string) (*entity.PaymentOrder, bool, error) {
+	return nil, false, nil
+}
+
+func (m *grpcMockWalletStore) RedeemCode(_ context.Context, _ int64, _ string) (*entity.WalletTransaction, error) {
+	return nil, nil
+}
+
+func (m *grpcMockWalletStore) ExpireStalePendingOrders(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
 // grpcMockVIPStore satisfies app.vipStore.
 type grpcMockVIPStore struct {
 	mu  sync.Mutex

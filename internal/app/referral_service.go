@@ -32,10 +32,11 @@ const (
 
 // ReferralService processes referral chain reward events, stats queries, and bulk code generation.
 type ReferralService struct {
-	accounts    accountStore
-	wallets     walletStore
-	redemptions redemptionCodeStore
-	stats       referralStatsStore // optional; nil when not wired
+	accounts     accountStore
+	wallets      walletStore
+	redemptions  redemptionCodeStore
+	stats        referralStatsStore  // optional; nil when not wired
+	rewardEvents rewardEventStore    // optional; nil when not wired (dedup disabled)
 }
 
 // NewReferralService creates a ReferralService without bulk-code support (legacy path).
@@ -51,6 +52,12 @@ func NewReferralServiceWithCodes(accounts accountStore, wallets walletStore, red
 // WithStats attaches a stats store to the service and returns it for chaining.
 func (s *ReferralService) WithStats(stats referralStatsStore) *ReferralService {
 	s.stats = stats
+	return s
+}
+
+// WithRewardEvents attaches a reward event store for deduplication and returns for chaining.
+func (s *ReferralService) WithRewardEvents(store rewardEventStore) *ReferralService {
+	s.rewardEvents = store
 	return s
 }
 
@@ -80,6 +87,7 @@ func (s *ReferralService) OnFirstSubscription(ctx context.Context, refereeID, re
 
 // OnRenewal awards renewal royalty to the referrer (5% of subscription amount, capped at 6 renewals).
 // renewalCount is the current renewal number (1-indexed). No reward issued after 6 renewals.
+// Uses "renewal_royalty_N" as eventType so each round gets its own UNIQUE slot.
 func (s *ReferralService) OnRenewal(ctx context.Context, refereeID, referrerID int64, amountCNY float64, renewalCount int) error {
 	if renewalCount > 6 {
 		return nil // Royalty window exhausted
@@ -88,7 +96,8 @@ func (s *ReferralService) OnRenewal(ctx context.Context, refereeID, referrerID i
 	if rewardLB <= 0 {
 		return nil
 	}
-	return s.reward(ctx, referrerID, refereeID, "renewal_royalty", rewardLB)
+	eventType := fmt.Sprintf("renewal_royalty_%d", renewalCount)
+	return s.reward(ctx, referrerID, refereeID, eventType, rewardLB)
 }
 
 // BulkGenerateCodes generates count unique redemption codes in a single batch.
@@ -160,6 +169,25 @@ func (s *ReferralService) reward(ctx context.Context, referrerID, refereeID int6
 	if err != nil || referrer == nil {
 		return fmt.Errorf("referrer %d not found", referrerID)
 	}
+
+	// Dedup via UNIQUE constraint: insert event first, skip if duplicate.
+	if s.rewardEvents != nil {
+		ev := &entity.ReferralRewardEvent{
+			ReferrerID:    referrerID,
+			RefereeID:     refereeID,
+			EventType:     eventType,
+			RewardCredits: amount,
+			Status:        "credited",
+		}
+		created, err := s.rewardEvents.CreateRewardEvent(ctx, ev)
+		if err != nil {
+			return fmt.Errorf("record reward event: %w", err)
+		}
+		if !created {
+			return nil // Duplicate reward, skip idempotently.
+		}
+	}
+
 	if _, err := s.wallets.GetOrCreate(ctx, referrerID); err != nil {
 		return fmt.Errorf("ensure referrer wallet: %w", err)
 	}

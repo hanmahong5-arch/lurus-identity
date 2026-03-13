@@ -37,6 +37,7 @@ func (r *WalletRepo) GetByAccountID(ctx context.Context, accountID int64) (*enti
 }
 
 // Credit adds amount to balance and appends a ledger entry atomically.
+// Balance arithmetic is performed in SQL (DECIMAL) to avoid float64 drift.
 func (r *WalletRepo) Credit(ctx context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
 	var tx entity.WalletTransaction
 	err := r.db.WithContext(ctx).Transaction(func(db *gorm.DB) error {
@@ -45,12 +46,18 @@ func (r *WalletRepo) Credit(ctx context.Context, accountID int64, amount float64
 			Where("account_id = ?", accountID).First(&w).Error; err != nil {
 			return fmt.Errorf("lock wallet: %w", err)
 		}
-		w.Balance += amount
-		if txType == entity.TxTypeTopup {
-			w.LifetimeTopup += amount
+		updates := map[string]any{
+			"balance": gorm.Expr("balance + ?", amount),
 		}
-		if err := db.Save(&w).Error; err != nil {
-			return fmt.Errorf("save wallet: %w", err)
+		if txType == entity.TxTypeTopup {
+			updates["lifetime_topup"] = gorm.Expr("lifetime_topup + ?", amount)
+		}
+		if err := db.Model(&w).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update wallet: %w", err)
+		}
+		// Re-read to get DB-computed DECIMAL balance.
+		if err := db.Where("id = ?", w.ID).First(&w).Error; err != nil {
+			return fmt.Errorf("re-read wallet: %w", err)
 		}
 		tx = entity.WalletTransaction{
 			WalletID:      w.ID,
@@ -69,6 +76,7 @@ func (r *WalletRepo) Credit(ctx context.Context, accountID int64, amount float64
 }
 
 // Debit subtracts amount from balance (fails if insufficient funds).
+// Uses conditional UPDATE with balance >= check for double-spend protection.
 func (r *WalletRepo) Debit(ctx context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
 	var tx entity.WalletTransaction
 	err := r.db.WithContext(ctx).Transaction(func(db *gorm.DB) error {
@@ -80,10 +88,21 @@ func (r *WalletRepo) Debit(ctx context.Context, accountID int64, amount float64,
 		if w.Balance < amount {
 			return fmt.Errorf("insufficient balance: have %.4f, need %.4f", w.Balance, amount)
 		}
-		w.Balance -= amount
-		w.LifetimeSpend += amount
-		if err := db.Save(&w).Error; err != nil {
-			return fmt.Errorf("save wallet: %w", err)
+		result := db.Model(&w).
+			Where("id = ? AND balance >= ?", w.ID, amount).
+			Updates(map[string]any{
+				"balance":        gorm.Expr("balance - ?", amount),
+				"lifetime_spend": gorm.Expr("lifetime_spend + ?", amount),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("update wallet: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("insufficient balance: have %.4f, need %.4f", w.Balance, amount)
+		}
+		// Re-read to get DB-computed DECIMAL balance.
+		if err := db.Where("id = ?", w.ID).First(&w).Error; err != nil {
+			return fmt.Errorf("re-read wallet: %w", err)
 		}
 		tx = entity.WalletTransaction{
 			WalletID:      w.ID,
@@ -183,7 +202,99 @@ func (r *WalletRepo) BulkCreate(ctx context.Context, codes []entity.RedemptionCo
 	return r.db.WithContext(ctx).CreateInBatches(codes, 100).Error
 }
 
-// GenerateOrderNo creates a unique order number: "LO" + date + 6-digit sequence.
-func GenerateOrderNo(accountID int64) string {
-	return fmt.Sprintf("LO%s%06d", time.Now().UTC().Format("20060102"), accountID%1000000)
+// MarkPaymentOrderPaid atomically transitions a pending order to paid.
+// Returns (order, didTransition, error). didTransition=true means this call
+// performed the transition; false means the order was already non-pending (idempotent).
+func (r *WalletRepo) MarkPaymentOrderPaid(ctx context.Context, orderNo string) (*entity.PaymentOrder, bool, error) {
+	now := time.Now().UTC()
+	result := r.db.WithContext(ctx).
+		Model(&entity.PaymentOrder{}).
+		Where("order_no = ? AND status = ?", orderNo, entity.OrderStatusPending).
+		Updates(map[string]any{"status": entity.OrderStatusPaid, "paid_at": now})
+	if result.Error != nil {
+		return nil, false, result.Error
+	}
+
+	var o entity.PaymentOrder
+	if err := r.db.WithContext(ctx).Where("order_no = ?", orderNo).First(&o).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	return &o, result.RowsAffected > 0, nil
 }
+
+// RedeemCode validates and applies a redemption code inside a single transaction.
+// Locks both the code row and the wallet row to prevent TOCTOU double-use.
+func (r *WalletRepo) RedeemCode(ctx context.Context, accountID int64, code string) (*entity.WalletTransaction, error) {
+	var tx entity.WalletTransaction
+	err := r.db.WithContext(ctx).Transaction(func(db *gorm.DB) error {
+		// 1. Lock the redemption code row.
+		var rc entity.RedemptionCode
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("code = ?", code).First(&rc).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("invalid code")
+			}
+			return fmt.Errorf("lock code: %w", err)
+		}
+
+		// 2. Validate code.
+		if rc.ExpiresAt != nil && rc.ExpiresAt.Before(time.Now()) {
+			return fmt.Errorf("code has expired")
+		}
+		if rc.UsedCount >= rc.MaxUses {
+			return fmt.Errorf("code has reached its usage limit")
+		}
+		if rc.RewardType != "credits" {
+			return fmt.Errorf("unsupported reward type: %s", rc.RewardType)
+		}
+
+		// 3. Lock wallet and credit via SQL arithmetic.
+		var w entity.Wallet
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_id = ?", accountID).First(&w).Error; err != nil {
+			return fmt.Errorf("lock wallet: %w", err)
+		}
+		if err := db.Model(&w).Update("balance", gorm.Expr("balance + ?", rc.RewardValue)).Error; err != nil {
+			return fmt.Errorf("credit wallet: %w", err)
+		}
+		if err := db.Where("id = ?", w.ID).First(&w).Error; err != nil {
+			return fmt.Errorf("re-read wallet: %w", err)
+		}
+
+		// 4. Create ledger entry.
+		tx = entity.WalletTransaction{
+			WalletID:      w.ID,
+			AccountID:     accountID,
+			Type:          entity.TxTypeRedemption,
+			Amount:        rc.RewardValue,
+			BalanceAfter:  w.Balance,
+			ReferenceType: "redemption_code",
+			ReferenceID:   rc.Code,
+			Description:   fmt.Sprintf("Redeem code %s", rc.Code),
+			ProductID:     rc.ProductID,
+		}
+		if err := db.Create(&tx).Error; err != nil {
+			return fmt.Errorf("create tx: %w", err)
+		}
+
+		// 5. Increment usage counter.
+		rc.UsedCount++
+		return db.Save(&rc).Error
+	})
+	return &tx, err
+}
+
+// ExpireStalePendingOrders marks pending orders older than maxAge as expired.
+func (r *WalletRepo) ExpireStalePendingOrders(ctx context.Context, maxAge time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-maxAge)
+	result := r.db.WithContext(ctx).
+		Model(&entity.PaymentOrder{}).
+		Where("status = ? AND created_at < ?", entity.OrderStatusPending, cutoff).
+		Update("status", "expired")
+	return result.RowsAffected, result.Error
+}
+

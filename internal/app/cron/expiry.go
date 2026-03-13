@@ -38,10 +38,16 @@ type EventPublisher interface {
 	Publish(ctx context.Context, ev *event.IdentityEvent) error
 }
 
+const (
+	// pendingOrderMaxAge is the maximum time an order can stay pending before being expired.
+	pendingOrderMaxAge = 24 * time.Hour
+)
+
 // ExpiryJob scans for expired subscriptions and transitions them through the
-// active → grace → expired lifecycle.
+// active → grace → expired lifecycle. Also cleans up stale pending payment orders.
 type ExpiryJob struct {
 	subs      *app.SubscriptionService
+	wallets   *app.WalletService // optional; nil when not wired
 	publisher EventPublisher
 	rdb       *redis.Client
 	interval  time.Duration
@@ -57,6 +63,12 @@ func NewExpiryJob(subs *app.SubscriptionService, publisher EventPublisher, rdb *
 		interval:  defaultInterval,
 		outbox:    outbox,
 	}
+}
+
+// WithWallets attaches the wallet service for pending-order cleanup and returns for chaining.
+func (j *ExpiryJob) WithWallets(w *app.WalletService) *ExpiryJob {
+	j.wallets = w
+	return j
 }
 
 // Run starts the recurring expiry job. It blocks until ctx is cancelled.
@@ -142,6 +154,17 @@ func (j *ExpiryJob) runExpiry(ctx context.Context) (scanned, processed, failed i
 			"phase":           "expired_downgraded",
 		})
 		processed++
+	}
+
+	// Phase 3: expire stale pending payment orders (>24h).
+	if j.wallets != nil {
+		expired, err := j.wallets.ExpireStalePendingOrders(ctx, pendingOrderMaxAge)
+		if err != nil {
+			slog.Error("cron/expiry: expire stale orders", "err", err)
+		} else if expired > 0 {
+			slog.Info("cron/expiry: expired stale pending orders", "count", expired)
+			processed += int(expired)
+		}
 	}
 	return
 }

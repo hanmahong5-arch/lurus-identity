@@ -255,6 +255,39 @@ func (m *mockWalletStore) ListOrders(_ context.Context, _ int64, _, _ int) ([]en
 	return nil, 0, nil
 }
 
+func (m *mockWalletStore) MarkPaymentOrderPaid(_ context.Context, orderNo string) (*entity.PaymentOrder, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.orders[orderNo]
+	if !ok {
+		return nil, false, nil
+	}
+	if o.Status != entity.OrderStatusPending {
+		cp := *o
+		return &cp, false, nil
+	}
+	now := time.Now().UTC()
+	o.Status = entity.OrderStatusPaid
+	o.PaidAt = &now
+	cp := *o
+	return &cp, true, nil
+}
+
+func (m *mockWalletStore) RedeemCode(_ context.Context, _ int64, code string) (*entity.WalletTransaction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rc, ok := m.codes[code]
+	if !ok {
+		return nil, fmt.Errorf("invalid code")
+	}
+	_ = rc
+	return &entity.WalletTransaction{Amount: 0}, nil
+}
+
+func (m *mockWalletStore) ExpireStalePendingOrders(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
 // ---------- mock vip store ----------
 
 type mockVIPStore struct {
@@ -433,7 +466,7 @@ type mockRefundStore struct{}
 func (m *mockRefundStore) Create(_ context.Context, _ *entity.Refund) error                                       { return nil }
 func (m *mockRefundStore) GetByRefundNo(_ context.Context, _ string) (*entity.Refund, error)                      { return nil, nil }
 func (m *mockRefundStore) GetPendingByOrderNo(_ context.Context, _ string) (*entity.Refund, error)                { return nil, nil }
-func (m *mockRefundStore) UpdateStatus(_ context.Context, _, _, _, _ string, _ *time.Time) error                  { return nil }
+func (m *mockRefundStore) UpdateStatus(_ context.Context, _, _, _, _, _ string, _ *time.Time) error               { return nil }
 func (m *mockRefundStore) MarkCompleted(_ context.Context, _ string, _ time.Time) error                           { return nil }
 func (m *mockRefundStore) ListByAccount(_ context.Context, _ int64, _, _ int) ([]entity.Refund, int64, error)     { return nil, 0, nil }
 

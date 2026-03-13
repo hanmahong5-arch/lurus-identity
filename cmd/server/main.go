@@ -154,7 +154,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	subSvc := app.NewSubscriptionService(subRepo, productRepo, entSvc, cfg.GracePeriodDays)
 	accountSvc := app.NewAccountService(accountRepo, walletRepo, vipRepo)
 	invoiceSvc := app.NewInvoiceService(invoiceRepo, walletRepo)
-	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo).WithStats(referralRepo)
+	referralSvc := app.NewReferralServiceWithCodes(accountRepo, walletRepo, walletRepo).WithStats(referralRepo).WithRewardEvents(referralRepo)
 	orgSvc := app.NewOrganizationService(orgRepo)
 	overviewSvc := app.NewOverviewService(accountRepo, vipSvc, walletRepo, subSvc, productRepo, ovCache)
 	checkinSvc := app.NewCheckinService(checkinRepo, walletRepo)
@@ -165,7 +165,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 		slog.Warn("nats publisher init failed, event publishing disabled", "err", err)
 	}
 	outboxRepo := repo.NewOutboxRepo(db)
-	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher, outboxRepo)
+	refundSvc := app.NewRefundService(refundRepo, walletRepo, publisher, outboxRepo).WithSubscriptionCanceller(subSvc)
 
 	// --- NATS Consumer (non-fatal) ---
 	consumer, err := identitynats.NewConsumer(nc, vipSvc)
@@ -322,7 +322,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// --- Cron Jobs ---
-	expiryJob := cron.NewExpiryJob(subSvc, publisher, rdb, outboxRepo)
+	expiryJob := cron.NewExpiryJob(subSvc, publisher, rdb, outboxRepo).WithWallets(walletSvc)
 	renewalJob := cron.NewRenewalJob(subSvc, subRepo, productRepo, walletSvc, publisher, rdb, time.Hour, outboxRepo)
 	outboxRelay := cron.NewOutboxRelay(outboxRepo, publisher)
 	notifJob := cron.NewNotificationJob(subRepo, accountRepo, emailSender, rdb, 24*time.Hour)

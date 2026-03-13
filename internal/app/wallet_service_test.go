@@ -122,7 +122,7 @@ func TestWalletService_Debit(t *testing.T) {
 	_, _ = ws.GetOrCreate(ctx, 1)
 	_, _ = svc.Topup(ctx, 1, 100.0, "LO-topup")
 
-	tx, err := svc.Debit(ctx, 1, 30.0, entity.TxTypeSubscription, "pro plan", "llm-api", "subscription", "sub-1")
+	tx, err := svc.Debit(ctx, 1, 30.0, entity.TxTypeSubscription, "pro plan", "subscription", "sub-1", "llm-api")
 	if err != nil {
 		t.Fatalf("Debit error: %v", err)
 	}

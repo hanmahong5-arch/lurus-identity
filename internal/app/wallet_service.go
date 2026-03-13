@@ -55,7 +55,8 @@ func (s *WalletService) Credit(ctx context.Context, accountID int64, amount floa
 }
 
 // Debit charges the wallet for a product purchase or subscription.
-func (s *WalletService) Debit(ctx context.Context, accountID int64, amount float64, txType, desc, productID, refType, refID string) (*entity.WalletTransaction, error) {
+// Parameter order matches walletStore: txType, desc, refType, refID, productID.
+func (s *WalletService) Debit(ctx context.Context, accountID int64, amount float64, txType, desc, refType, refID, productID string) (*entity.WalletTransaction, error) {
 	return s.wallets.Debit(ctx, accountID, amount, txType, desc, refType, refID, productID)
 }
 
@@ -64,36 +65,10 @@ func (s *WalletService) UpdatePaymentOrder(ctx context.Context, o *entity.Paymen
 	return s.wallets.UpdatePaymentOrder(ctx, o)
 }
 
-// Redeem validates and applies a redemption code.
+// Redeem validates and applies a redemption code atomically (TOCTOU safe).
 func (s *WalletService) Redeem(ctx context.Context, accountID int64, code string) error {
-	rc, err := s.wallets.GetRedemptionCode(ctx, strings.ToUpper(strings.TrimSpace(code)))
-	if err != nil {
-		return fmt.Errorf("get redemption code: %w", err)
-	}
-	if rc == nil {
-		return fmt.Errorf("invalid code")
-	}
-	if rc.ExpiresAt != nil && rc.ExpiresAt.Before(time.Now()) {
-		return fmt.Errorf("code has expired")
-	}
-	if rc.UsedCount >= rc.MaxUses {
-		return fmt.Errorf("code has reached its usage limit")
-	}
-
-	switch rc.RewardType {
-	case "credits":
-		if _, err := s.wallets.Credit(ctx, accountID, rc.RewardValue,
-			entity.TxTypeRedemption,
-			fmt.Sprintf("兑换码 %s 充值", rc.Code),
-			"redemption_code", rc.Code, rc.ProductID); err != nil {
-			return fmt.Errorf("credit wallet: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported reward type: %s", rc.RewardType)
-	}
-
-	rc.UsedCount++
-	return s.wallets.UpdateRedemptionCode(ctx, rc)
+	_, err := s.wallets.RedeemCode(ctx, accountID, strings.ToUpper(strings.TrimSpace(code)))
+	return err
 }
 
 // ListTransactions returns paginated wallet transactions.
@@ -154,22 +129,24 @@ func (s *WalletService) GetOrderByNo(ctx context.Context, accountID int64, order
 	return o, nil
 }
 
-// MarkOrderPaid marks an order as paid and credits the wallet.
+// ExpireStalePendingOrders marks pending orders older than maxAge as expired.
+// Returns the number of orders expired.
+func (s *WalletService) ExpireStalePendingOrders(ctx context.Context, maxAge time.Duration) (int64, error) {
+	return s.wallets.ExpireStalePendingOrders(ctx, maxAge)
+}
+
+// MarkOrderPaid atomically marks an order as paid and credits the wallet.
+// Uses conditional UPDATE to prevent double-charge on concurrent webhook delivery.
 func (s *WalletService) MarkOrderPaid(ctx context.Context, orderNo string) (*entity.PaymentOrder, error) {
-	o, err := s.wallets.GetPaymentOrderByNo(ctx, orderNo)
-	if err != nil || o == nil {
-		return nil, fmt.Errorf("order %s not found", orderNo)
-	}
-	if o.Status == entity.OrderStatusPaid {
-		return o, nil // idempotent
-	}
-	now := time.Now().UTC()
-	o.Status = entity.OrderStatusPaid
-	o.PaidAt = &now
-	if err := s.wallets.UpdatePaymentOrder(ctx, o); err != nil {
+	o, didTransition, err := s.wallets.MarkPaymentOrderPaid(ctx, orderNo)
+	if err != nil {
 		return nil, err
 	}
-	if o.OrderType == "topup" {
+	if o == nil {
+		return nil, fmt.Errorf("order %s not found", orderNo)
+	}
+	// Only credit wallet when this call actually flipped pending→paid.
+	if didTransition && o.OrderType == "topup" {
 		if _, err := s.Topup(ctx, o.AccountID, o.AmountCNY, o.OrderNo); err != nil {
 			return nil, fmt.Errorf("credit wallet: %w", err)
 		}

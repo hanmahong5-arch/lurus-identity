@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -92,13 +93,25 @@ func (h *SubscriptionHandler) Checkout(c *gin.Context) {
 			if _, err := h.wallets.Debit(c.Request.Context(), accountID, plan.PriceCNY,
 				entity.TxTypeSubscription,
 				"订阅 "+req.ProductID+" 套餐",
-				req.ProductID, "subscription", ""); err != nil {
+				"subscription", "", req.ProductID); err != nil {
 				c.JSON(http.StatusPaymentRequired, gin.H{"error": err.Error()})
 				return
 			}
 		}
 		sub, err := h.subs.Activate(c.Request.Context(), accountID, req.ProductID, req.PlanID, req.PaymentMethod, "")
 		if err != nil {
+			// Compensate: refund already-debited amount if activation fails.
+			if plan.PriceCNY > 0 {
+				_, creditErr := h.wallets.Credit(c.Request.Context(), accountID, plan.PriceCNY,
+					"subscription_payment_refund",
+					"Subscription activation failed, auto-refund",
+					"subscription", "", req.ProductID)
+				if creditErr != nil {
+					slog.Error("CRITICAL: subscription checkout compensation failed",
+						"account_id", accountID, "amount", plan.PriceCNY,
+						"activate_err", err, "credit_err", creditErr)
+				}
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
